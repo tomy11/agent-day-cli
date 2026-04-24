@@ -7,6 +7,7 @@ import {InteractiveApprovalManager, WorkspacePathGuard} from '../core/security'
 import {loadDaycliConfig, resolveRunSettings} from '../core/config'
 import {createLogger} from '../core/observability'
 import {toAppError} from '../core/errors'
+import {buildCodeContext} from '../core/retrieval'
 
 export default class Run extends Command {
   static override description = 'Run a single task prompt'
@@ -57,12 +58,38 @@ export default class Run extends Command {
       timeoutMs: settings.timeoutMs,
     })
 
-    const messages = [
-      ...(flags.system ? [{role: 'system' as const, content: flags.system}] : []),
-      {role: 'user' as const, content: args.task},
-    ]
+    const systemMessages: {role: 'system'; content: string}[] = []
+
+    if (flags.system) {
+      systemMessages.push({role: 'system', content: flags.system})
+    }
 
     try {
+      try {
+        const codeContext = await buildCodeContext({
+          workspaceRoot,
+          query: args.task,
+        })
+
+        if (codeContext.context.length > 0) {
+          systemMessages.push({
+            role: 'system',
+            content: codeContext.truncated
+              ? `Relevant code context (truncated):\n${codeContext.context}`
+              : `Relevant code context:\n${codeContext.context}`,
+          })
+          logger.info('retrieval.context.done', 'retrieval context assembled', {
+            chunkCount: codeContext.chunkCount,
+            truncated: codeContext.truncated,
+          })
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        logger.warn('retrieval.context.failed', 'failed to build retrieval context; continuing without it', {
+          error: message,
+        })
+      }
+
       if (flags['read-file']) {
         logger.info('tool.read_file.start', 'executing read_file tool', {
           path: flags['read-file'],
@@ -92,7 +119,7 @@ export default class Run extends Command {
           ? `File context from ${payload.path} (truncated):\n${payload.content}`
           : `File context from ${payload.path}:\n${payload.content}`
 
-        messages.unshift({
+        systemMessages.push({
           role: 'system',
           content: contextMessage,
         })
@@ -102,6 +129,7 @@ export default class Run extends Command {
         })
       }
 
+      const messages = [...systemMessages, {role: 'user' as const, content: args.task}]
       const response = await provider.chat({messages})
       logger.info('provider.chat.done', 'provider response received', {
         model: response.model,

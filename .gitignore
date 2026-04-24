@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
+.daycli/
 .env
 .env.*
 !.env.example
