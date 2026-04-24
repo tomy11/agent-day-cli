@@ -12,10 +12,10 @@ const DEFAULT_HINTS = [
   'Use /help to list commands',
 ]
 
-export function HelpHints({hints = DEFAULT_HINTS}: HelpHintsProps): React.JSX.Element {
+export function HelpHints({hints = DEFAULT_HINTS}: HelpHintsProps = {}): React.JSX.Element {
   return React.createElement(
     Box,
     {marginTop: 1, flexDirection: 'column'},
-    ...hints.map(hint => React.createElement(Text, {key: hint, color: DEFAULT_UI_THEME.muted}, `• ${hint}`)),
+    ...hints.map(hint => React.createElement(Text, {key: hint, color: DEFAULT_UI_THEME.muted}, `- ${hint}`)),
   )
 }

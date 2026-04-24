@@ -20,7 +20,7 @@
 - [x] Phase 3 (Quality): upgrade to syntax-aware chunking (AST/function boundary first)
 - [x] Phase 3 (Quality): add safe noise reduction policy (trim logs/test fixtures, keep useful docs)
 - [x] UI Workstream: build Ink UI components in `src/ui/components`
-- [ ] UI Workstream: implement interactive chat loop in `src/commands/chat.ts`
+- [x] UI Workstream: implement interactive chat loop in `src/commands/chat.ts`
 - [ ] UI Workstream: add output formatter modes for `run` (plain/rich)
 
 ## In Progress

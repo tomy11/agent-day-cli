@@ -2,7 +2,7 @@ import React, {useEffect, useState} from 'react'
 import {Box, Text} from 'ink'
 import {DEFAULT_UI_THEME} from './theme'
 
-const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+const FRAMES = ['-', '\\', '|', '/']
 
 interface LoadingIndicatorProps {
   label?: string
