@@ -1,5 +1,7 @@
+import React from 'react'
 import {Args, Command} from '@oclif/core'
 import {Flags} from '@oclif/core'
+import {render} from 'ink'
 import {OllamaProvider} from '../core/providers'
 import {SafeExecutor} from '../core/execution'
 import {createDefaultToolRouter} from '../core/tools'
@@ -8,6 +10,7 @@ import {loadDaycliConfig, resolveRunSettings} from '../core/config'
 import {createLogger} from '../core/observability'
 import {toAppError} from '../core/errors'
 import {buildCodeContext} from '../core/retrieval'
+import {RunResultView} from '../ui'
 
 export default class Run extends Command {
   static override description = 'Run a single task prompt'
@@ -32,6 +35,11 @@ export default class Run extends Command {
     }),
     system: Flags.string({
       description: 'Optional system prompt',
+    }),
+    output: Flags.string({
+      description: 'Output formatter mode',
+      options: ['plain', 'rich'],
+      default: 'plain',
     }),
     'read-file': Flags.string({
       description: 'Read a workspace file and inject its content as extra context',
@@ -64,6 +72,8 @@ export default class Run extends Command {
       systemMessages.push({role: 'system', content: flags.system})
     }
 
+    let retrievalSummary: {chunkCount: number; truncated: boolean} | undefined
+
     try {
       try {
         const codeContext = await buildCodeContext({
@@ -82,6 +92,10 @@ export default class Run extends Command {
             chunkCount: codeContext.chunkCount,
             truncated: codeContext.truncated,
           })
+          retrievalSummary = {
+            chunkCount: codeContext.chunkCount,
+            truncated: codeContext.truncated,
+          }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -134,6 +148,26 @@ export default class Run extends Command {
       logger.info('provider.chat.done', 'provider response received', {
         model: response.model,
       })
+
+      if (flags.output === 'rich') {
+        if (!process.stdout.isTTY || !process.stdin.isTTY) {
+          logger.warn('output.rich.unavailable', 'rich output requires TTY; falling back to plain')
+          this.log(response.content)
+          return
+        }
+
+        const app = render(
+          React.createElement(RunResultView, {
+            task: args.task,
+            model: response.model,
+            response: response.content,
+            retrieval: retrievalSummary,
+          }),
+        )
+        await app.waitUntilExit()
+        return
+      }
+
       this.log(response.content)
     } catch (error) {
       const appError = toAppError(error)
