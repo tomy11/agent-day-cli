@@ -1,0 +1,41 @@
+{
+  "name": "daycli",
+  "version": "0.1.0",
+  "description": "TypeScript AI CLI agent",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "daycli": "./bin/run.js"
+  },
+  "files": [
+    "/bin",
+    "/dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist",
+    "dev": "./bin/dev.js",
+    "start": "./bin/run.js",
+    "test": "npm run build && node --test dist/tests/**/*.test.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@oclif/core": "^4.2.9",
+    "@oclif/plugin-help": "^6.2.31"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.17",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "oclif": {
+    "bin": "daycli",
+    "commands": "./dist/commands",
+    "topicSeparator": " ",
+    "plugins": [
+      "@oclif/plugin-help"
+    ]
+  }
+}
