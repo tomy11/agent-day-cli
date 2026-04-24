@@ -12,10 +12,17 @@ export interface CodeChunk {
   totalChunksInFile: number
 }
 
+export interface IndexedFile {
+  filePath: string
+  updatedAt: number
+  size: number
+}
+
 export interface CodeIndex {
   version: number
   workspaceRoot: string
   generatedAt: string
+  files: IndexedFile[]
   chunks: CodeChunk[]
 }
 

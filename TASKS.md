@@ -16,7 +16,7 @@
 - [x] Phase 1 (MVP Retrieval): add chunk metadata (path/symbol/imports/language/updatedAt)
 - [x] Phase 1 (MVP Retrieval): implement 2-stage retrieval (vector search + symbol/keyword rerank)
 - [x] Phase 1 (MVP Retrieval): implement context assembly (top-k + neighbor chunks)
-- [ ] Phase 2 (Performance): implement incremental indexing based on changed files
+- [x] Phase 2 (Performance): implement incremental indexing based on changed files
 - [ ] Phase 3 (Quality): upgrade to syntax-aware chunking (AST/function boundary first)
 - [ ] Phase 3 (Quality): add safe noise reduction policy (trim logs/test fixtures, keep useful docs)
 - [ ] UI Workstream: build Ink UI components in `src/ui/components`
