@@ -23,10 +23,13 @@
   },
   "dependencies": {
     "@oclif/core": "^4.2.9",
-    "@oclif/plugin-help": "^6.2.31"
+    "@oclif/plugin-help": "^6.2.31",
+    "ink": "^3.2.0",
+    "react": "^17.0.2"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",
+    "@types/react": "^17.0.80",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   },
