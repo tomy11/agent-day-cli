@@ -22,6 +22,7 @@
 - [x] UI Workstream: build Ink UI components in `src/ui/components`
 - [x] UI Workstream: implement interactive chat loop in `src/commands/chat.ts`
 - [x] UI Workstream: add output formatter modes for `run` (plain/rich)
+- [x] UI Workstream: add branded chat welcome hero (ASCII logo + prompt hints)
 
 ## In Progress
 - [ ] (none)

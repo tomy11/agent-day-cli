@@ -46,6 +46,11 @@ Command Handler <-> LLM Provider (OllamaProvider)
 - `src/security/pathGuard.ts` : ตรวจ path traversal / out-of-scope
 - `src/security/approvalManager.ts` : interactive approval flow
 
+## UI Composition (Ink)
+- `src/ui/components/AppFrame.ts` : กรอบหลักของหน้าจอ chat/run
+- `src/ui/components/ChatApp.ts` : state machine ของ interactive session
+- `src/ui/components/WelcomeHero.ts` : branded welcome (ASCII logo + usage hints) แสดงตอนเริ่ม session
+
 ## Safety Principles
 - Default deny: ปฏิเสธการเข้าถึงที่ไม่ตรง policy
 - Explicit approval: งานเสี่ยงต้องยืนยันก่อน

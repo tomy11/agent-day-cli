@@ -6,6 +6,7 @@ import {ChatHeader} from './ChatHeader'
 import {LoadingIndicator} from './LoadingIndicator'
 import {MessageBubble} from './MessageBubble'
 import {StatusLine, type StatusTone} from './StatusLine'
+import {WelcomeHero} from './WelcomeHero'
 import {DEFAULT_UI_THEME} from './theme'
 
 interface UiMessage {
@@ -22,16 +23,12 @@ interface ChatAppProps {
 export function ChatApp({model, provider, systemPrompt}: ChatAppProps): React.JSX.Element {
   const {exit} = useApp()
   const [input, setInput] = useState('')
-  const [messages, setMessages] = useState<UiMessage[]>([
-    {
-      role: 'system',
-      content: 'Interactive mode ready. Type a prompt and press Enter.',
-    },
-  ])
+  const [messages, setMessages] = useState<UiMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [statusText, setStatusText] = useState('Connected')
   const [statusTone, setStatusTone] = useState<StatusTone>('success')
   const conversationRef = useRef<ChatMessage[]>([])
+  const showWelcomeHero = messages.length === 0 && conversationRef.current.length === 0 && !isLoading
 
   useInput((value, key) => {
     if (key.ctrl && value === 'c') {
@@ -77,6 +74,7 @@ export function ChatApp({model, provider, systemPrompt}: ChatAppProps): React.JS
       footer: '/help  /clear  /exit',
     },
     React.createElement(ChatHeader, {model}),
+    showWelcomeHero ? React.createElement(WelcomeHero, {model}) : null,
     React.createElement(
       Box,
       {marginTop: 1, flexDirection: 'column'},
