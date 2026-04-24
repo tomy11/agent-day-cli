@@ -6,8 +6,14 @@ export interface ChunkingOptions {
 }
 
 const DEFAULT_CHUNK_SIZE_LINES = 300
+const MIN_DECLARATION_GAP_LINES = 2
 const IMPORT_REGEX = /^\s*import\s.+from\s+['"]([^'"]+)['"]\s*;?\s*$/
 const REQUIRE_REGEX = /require\(\s*['"]([^'"]+)['"]\s*\)/
+const DECLARATION_START_REGEX =
+  /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|class|interface|type|enum|const|let|var)\s+[A-Za-z_][A-Za-z0-9_]*/
+const NOISE_LOG_REGEX = /\b(?:console|logger)\.(?:log|debug|trace|info)\(/
+const FIXTURE_BLOCK_START_REGEX = /^\s*(?:const|let|var)\s+[A-Za-z0-9_]*(?:fixture|fixtures|mock|data|payload)\w*\s*=\s*[\[{`]/
+const FIXTURE_HEAVY_LINE_REGEX = /^[\s"',`:[\]{}0-9A-Za-z._+-]*,?$/
 
 const PRIMARY_SYMBOL_PATTERNS = [
   /^\s*export\s+(?:default\s+)?class\s+([A-Za-z0-9_]+)/,
@@ -34,36 +40,37 @@ export function buildChunksForFile(input: {
   const filePath = normalizePath(input.filePath)
   const lines = input.content.split(/\r?\n/)
   const chunkSize = input.options?.chunkSizeLines ?? DEFAULT_CHUNK_SIZE_LINES
-  const totalChunks = Math.max(1, Math.ceil(Math.max(lines.length, 1) / chunkSize))
   const language = getLanguageFromPath(filePath)
-  const chunks: CodeChunk[] = []
+  const ranges = getChunkRanges(lines, language, chunkSize)
+  const draftChunks: Omit<CodeChunk, 'indexInFile' | 'totalChunksInFile'>[] = []
 
-  for (let index = 0; index < totalChunks; index += 1) {
-    const startLine = index * chunkSize + 1
-    const endLine = Math.min((index + 1) * chunkSize, Math.max(lines.length, 1))
-    const slice = lines.slice(startLine - 1, endLine)
-    const content = slice.join('\n').trimEnd()
-
+  for (const range of ranges) {
+    const slice = lines.slice(range.startLine - 1, range.endLine)
+    const reducedLines = applyNoiseReduction(slice, filePath)
+    const content = reducedLines.join('\n').trimEnd()
     if (!content.trim()) {
       continue
     }
 
-    chunks.push({
-      id: `${filePath}:${startLine}-${endLine}`,
+    draftChunks.push({
+      id: `${filePath}:${range.startLine}-${range.endLine}`,
       filePath,
       language,
-      startLine,
-      endLine,
+      startLine: range.startLine,
+      endLine: range.endLine,
       symbol: detectSymbol(slice),
       imports: detectImports(slice),
       updatedAt: input.updatedAt,
       content,
-      indexInFile: index,
-      totalChunksInFile: totalChunks,
     })
   }
 
-  return chunks
+  const totalChunks = draftChunks.length
+  return draftChunks.map((chunk, index) => ({
+    ...chunk,
+    indexInFile: index,
+    totalChunksInFile: totalChunks,
+  }))
 }
 
 function getLanguageFromPath(filePath: string): string {
@@ -135,4 +142,170 @@ function detectImports(lines: string[]): string[] {
 
 function normalizePath(filePath: string): string {
   return filePath.split(path.sep).join('/')
+}
+
+function getChunkRanges(
+  lines: string[],
+  language: string,
+  chunkSizeLines: number,
+): Array<{startLine: number; endLine: number}> {
+  const lineCount = Math.max(lines.length, 1)
+
+  if (!isSyntaxAwareLanguage(language)) {
+    return getFixedRanges(lineCount, chunkSizeLines)
+  }
+
+  const declarationStarts = findDeclarationStarts(lines)
+  if (declarationStarts.length <= 1) {
+    return getFixedRanges(lineCount, chunkSizeLines)
+  }
+
+  const ranges: Array<{startLine: number; endLine: number}> = []
+
+  for (let i = 0; i < declarationStarts.length; i += 1) {
+    const start = declarationStarts[i] + 1
+    const nextStart = i + 1 < declarationStarts.length ? declarationStarts[i + 1] + 1 : lineCount + 1
+    const end = nextStart - 1
+    ranges.push(...splitRangeByLimit(start, end, chunkSizeLines))
+  }
+
+  return ranges
+}
+
+function isSyntaxAwareLanguage(language: string): boolean {
+  return language === 'typescript' || language === 'tsx' || language === 'javascript' || language === 'jsx'
+}
+
+function getFixedRanges(lineCount: number, chunkSizeLines: number): Array<{startLine: number; endLine: number}> {
+  const ranges: Array<{startLine: number; endLine: number}> = []
+
+  for (let startLine = 1; startLine <= lineCount; startLine += chunkSizeLines) {
+    ranges.push({
+      startLine,
+      endLine: Math.min(startLine + chunkSizeLines - 1, lineCount),
+    })
+  }
+
+  return ranges
+}
+
+function findDeclarationStarts(lines: string[]): number[] {
+  const starts = [0]
+  let braceDepth = 0
+  let lastAccepted = 0
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const trimmed = line.trim()
+
+    if (
+      index > 0 &&
+      braceDepth === 0 &&
+      DECLARATION_START_REGEX.test(trimmed) &&
+      index - lastAccepted >= MIN_DECLARATION_GAP_LINES
+    ) {
+      starts.push(index)
+      lastAccepted = index
+    }
+
+    braceDepth += countChar(line, '{')
+    braceDepth -= countChar(line, '}')
+    if (braceDepth < 0) {
+      braceDepth = 0
+    }
+  }
+
+  return starts
+}
+
+function splitRangeByLimit(
+  startLine: number,
+  endLine: number,
+  chunkSizeLines: number,
+): Array<{startLine: number; endLine: number}> {
+  if (endLine < startLine) {
+    return []
+  }
+
+  const ranges: Array<{startLine: number; endLine: number}> = []
+  for (let start = startLine; start <= endLine; start += chunkSizeLines) {
+    ranges.push({
+      startLine: start,
+      endLine: Math.min(start + chunkSizeLines - 1, endLine),
+    })
+  }
+
+  return ranges
+}
+
+function countChar(input: string, char: string): number {
+  let count = 0
+  for (const candidate of input) {
+    if (candidate === char) {
+      count += 1
+    }
+  }
+
+  return count
+}
+
+function applyNoiseReduction(lines: string[], filePath: string): string[] {
+  const isTestOrFixtureFile = /(test|spec|__tests__|__fixtures__|fixtures|mock)/i.test(filePath)
+  const output: string[] = []
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+
+    if (NOISE_LOG_REGEX.test(line) && line.length > 140) {
+      output.push('/* [noise-reduction] verbose log removed */')
+      continue
+    }
+
+    if (isTestOrFixtureFile && FIXTURE_BLOCK_START_REGEX.test(line)) {
+      const block = collectFixtureBlock(lines, index)
+      if (block.shouldCollapse) {
+        output.push('/* [noise-reduction] large fixture block collapsed */')
+        index = block.endIndex
+        continue
+      }
+    }
+
+    output.push(line)
+  }
+
+  return output
+}
+
+function collectFixtureBlock(lines: string[], startIndex: number): {endIndex: number; shouldCollapse: boolean} {
+  let braceDepth = 0
+  let heavyLines = 0
+  let endIndex = startIndex
+  let seenStart = false
+
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = lines[index]
+    const openCount = countChar(line, '{') + countChar(line, '[')
+    const closeCount = countChar(line, '}') + countChar(line, ']')
+    braceDepth += openCount - closeCount
+    if (openCount > 0) {
+      seenStart = true
+    }
+
+    if (FIXTURE_HEAVY_LINE_REGEX.test(line.trim())) {
+      heavyLines += 1
+    }
+
+    endIndex = index
+    if (seenStart && braceDepth <= 0 && index > startIndex) {
+      break
+    }
+
+    if (index - startIndex >= 120) {
+      break
+    }
+  }
+
+  const blockLength = endIndex - startIndex + 1
+  const shouldCollapse = blockLength >= 20 && heavyLines / blockLength > 0.7
+  return {endIndex, shouldCollapse}
 }

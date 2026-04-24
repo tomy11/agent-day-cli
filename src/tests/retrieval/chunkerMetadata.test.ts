@@ -21,9 +21,9 @@ test('chunker extracts metadata fields from code chunk', () => {
     options: {chunkSizeLines: 50},
   })
 
-  assert.equal(chunks.length, 1)
+  assert.ok(chunks.length >= 1)
   assert.equal(chunks[0].language, 'typescript')
-  assert.equal(chunks[0].symbol, 'InteractiveApprovalManager')
   assert.deepEqual(chunks[0].imports, ['node:readline/promises', 'node:fs'])
   assert.equal(chunks[0].filePath, 'src/core/security/approvalManager.ts')
+  assert.ok(chunks.some(chunk => chunk.symbol === 'InteractiveApprovalManager'))
 })
