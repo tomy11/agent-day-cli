@@ -5,6 +5,7 @@ import {loadDaycliConfig, resolveRunSettings} from '../core/config'
 import {toAppError} from '../core/errors'
 import {createLogger} from '../core/observability'
 import {OllamaProvider} from '../core/providers'
+import {buildWorkspaceSummary} from '../core/workspace'
 import {ChatApp} from '../ui'
 
 export default class Chat extends Command {
@@ -50,11 +51,37 @@ export default class Chat extends Command {
         timeoutMs: settings.timeoutMs,
       })
 
+      const systemPromptParts: string[] = []
+      if (flags.system) {
+        systemPromptParts.push(flags.system)
+      }
+
+      try {
+        const snapshot = await buildWorkspaceSummary(workspaceRoot)
+        systemPromptParts.push(
+          [
+            'You are an interactive coding assistant running inside the current workspace.',
+            'Use this workspace snapshot to answer project-structure questions directly without asking users to paste file trees again.',
+            'If information is not visible in this snapshot, state that limitation clearly and ask a focused follow-up question.',
+            `Workspace snapshot (entries=${snapshot.entryCount}, truncated=${snapshot.truncated ? 'yes' : 'no'}):`,
+            snapshot.summary,
+          ].join('\n'),
+        )
+        logger.info('workspace.snapshot.ready', 'workspace summary prepared for chat', {
+          entries: snapshot.entryCount,
+          truncated: snapshot.truncated,
+        })
+      } catch (error) {
+        logger.warn('workspace.snapshot.failed', 'workspace summary unavailable; continuing without snapshot', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+
       const app = render(
         React.createElement(ChatApp, {
           model: settings.model,
           provider,
-          systemPrompt: flags.system,
+          systemPrompt: systemPromptParts.length > 0 ? systemPromptParts.join('\n\n') : undefined,
         }),
       )
       await app.waitUntilExit()

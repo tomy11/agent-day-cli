@@ -45,6 +45,7 @@ Command Handler <-> LLM Provider (OllamaProvider)
 - `src/execution/safeExecutor.ts` : บังคับ policy ก่อน execute
 - `src/security/pathGuard.ts` : ตรวจ path traversal / out-of-scope
 - `src/security/approvalManager.ts` : interactive approval flow
+- `src/core/workspace/workspaceSummary.ts` : สร้าง workspace snapshot แบบ read-only สำหรับระบบ prompt/context
 
 ## UI Composition (Ink)
 - `src/ui/components/AppFrame.ts` : กรอบหลักของหน้าจอ chat/run

@@ -23,6 +23,7 @@
 - [x] UI Workstream: implement interactive chat loop in `src/commands/chat.ts`
 - [x] UI Workstream: add output formatter modes for `run` (plain/rich)
 - [x] UI Workstream: add branded chat welcome hero (ASCII logo + prompt hints)
+- [x] UX Workstream: inject workspace snapshot into `chat` system prompt for structure-aware responses
 
 ## In Progress
 - [ ] (none)
