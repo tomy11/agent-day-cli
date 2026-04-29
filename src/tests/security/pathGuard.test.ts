@@ -39,3 +39,30 @@ test('WorkspacePathGuard blocks path outside workspace', () => {
     },
   )
 })
+
+test('WorkspacePathGuard applies write path policy for mutation tools', () => {
+  const guard = new WorkspacePathGuard()
+  const workspaceRoot = process.cwd()
+  const writeTool: ToolDefinition = {
+    name: 'write_file',
+    description: 'write file',
+    riskLevel: 'high',
+    extractPaths(input) {
+      const payload = input as {path: string}
+      return [payload.path]
+    },
+    async execute() {
+      return 'ok'
+    },
+  }
+
+  assert.throws(
+    () => guard.assertAllowed(writeTool, {path: 'dist/generated.js'}, {workspaceRoot}),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError)
+      assert.equal(error.code, 'TOOL_PATH_BLOCKED')
+      assert.equal(error.meta?.access, 'write')
+      return true
+    },
+  )
+})

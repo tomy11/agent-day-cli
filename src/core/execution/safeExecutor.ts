@@ -1,6 +1,11 @@
 import type {ToolRouter} from '../tools/toolRouter'
 import type {ToolCall, ToolContext, ToolDefinition, ToolExecutionResult} from '../tools/types'
 import {AppError} from '../errors'
+import {
+  SafetyPolicyViolation,
+  assertCommandAllowedByPolicy,
+  type SafetyPolicy,
+} from '../security/safetyPolicy'
 
 export interface PathGuard {
   assertAllowed(tool: ToolDefinition, input: unknown, context: ToolContext): void
@@ -18,23 +23,27 @@ interface SafeExecutorOptions {
   toolRouter: ToolRouter
   pathGuard?: PathGuard
   approvalManager?: ApprovalManager
+  safetyPolicy?: SafetyPolicy
 }
 
 export class SafeExecutor {
   private readonly toolRouter: ToolRouter
   private readonly pathGuard?: PathGuard
   private readonly approvalManager?: ApprovalManager
+  private readonly safetyPolicy?: SafetyPolicy
 
   public constructor(options: SafeExecutorOptions) {
     this.toolRouter = options.toolRouter
     this.pathGuard = options.pathGuard
     this.approvalManager = options.approvalManager
+    this.safetyPolicy = options.safetyPolicy
   }
 
   public async execute(call: ToolCall, context: ToolContext): Promise<ToolExecutionResult> {
     const tool = this.toolRouter.resolve(call)
 
     this.pathGuard?.assertAllowed(tool, call.input, context)
+    this.assertCommandsAllowed(tool, call.input)
     await this.ensureApproved(tool, call.input, context)
 
     try {
@@ -85,6 +94,30 @@ export class SafeExecutor {
       throw new AppError('TOOL_APPROVAL_REJECTED', `Tool execution rejected by user: ${tool.name}`, {
         meta: {toolName: tool.name},
       })
+    }
+  }
+
+  private assertCommandsAllowed(tool: ToolDefinition, input: unknown): void {
+    const commands = tool.extractCommands?.(input) ?? []
+    for (const command of commands) {
+      try {
+        assertCommandAllowedByPolicy({
+          command,
+          policy: this.safetyPolicy,
+        })
+      } catch (error) {
+        if (error instanceof SafetyPolicyViolation) {
+          throw new AppError('TOOL_EXECUTION_FAILED', error.message, {
+            meta: {
+              toolName: tool.name,
+              command,
+              ...error.meta,
+            },
+          })
+        }
+
+        throw error
+      }
     }
   }
 }

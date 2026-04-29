@@ -14,6 +14,7 @@ export interface ToolDefinition {
   description: string
   riskLevel: ToolRiskLevel
   extractPaths?(input: unknown): string[]
+  extractCommands?(input: unknown): string[]
   execute(input: unknown, context: ToolContext): Promise<unknown>
 }
 

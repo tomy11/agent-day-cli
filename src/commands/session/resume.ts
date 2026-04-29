@@ -9,7 +9,7 @@ import {createLogger} from '../../core/observability'
 import {OllamaProvider} from '../../core/providers'
 import {InteractiveApprovalManager, WorkspacePathGuard} from '../../core/security'
 import {SessionStore, type SessionMessageRole, type SessionRecord} from '../../core/storage'
-import {createDefaultToolRouter} from '../../core/tools'
+import {buildToolSystemPrompt, createDefaultToolRouter} from '../../core/tools'
 import {buildWorkspaceSummary} from '../../core/workspace'
 import {ChatApp} from '../../ui'
 
@@ -65,8 +65,9 @@ export default class SessionResume extends Command {
         baseUrl: settings.baseUrl,
         timeoutMs: settings.timeoutMs,
       })
+      const router = createDefaultToolRouter()
       const executor = new SafeExecutor({
-        toolRouter: createDefaultToolRouter(),
+        toolRouter: router,
         pathGuard: new WorkspacePathGuard(),
         approvalManager: new InteractiveApprovalManager(),
       })
@@ -106,7 +107,9 @@ export default class SessionResume extends Command {
         await sessionStore.updateStatus(session.id, 'active')
       }
 
-      const systemPromptParts: string[] = []
+      const systemPromptParts: string[] = [
+        buildToolSystemPrompt(router.list()),
+      ]
       if (flags.system) {
         systemPromptParts.push(flags.system)
       }

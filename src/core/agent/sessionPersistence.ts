@@ -46,6 +46,7 @@ export async function persistAgentToolResults(input: {
           name: step.toolCall.name,
           input: step.toolCall.input,
         },
+        toolResult: summarizeToolResult(step.result.toolName, step.result.output),
       },
     })
   }
@@ -76,4 +77,76 @@ function summarizeAgentStep(step: AgentStep): AgentStepSummary {
         createdAt: step.createdAt,
       }
   }
+}
+
+function summarizeToolResult(toolName: string, output: unknown): Record<string, unknown> {
+  if (isRecoverableToolError(output)) {
+    return {
+      ok: false,
+      error: output.error,
+    }
+  }
+
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    return {
+      ok: true,
+      outputType: typeof output,
+    }
+  }
+
+  const payload = output as Record<string, unknown>
+
+  switch (toolName) {
+    case 'write_file':
+      return pickDefined({
+        ok: true,
+        path: payload.path,
+        absolutePath: payload.absolutePath,
+        bytesWritten: payload.bytesWritten,
+        created: payload.created,
+        overwritten: payload.overwritten,
+      })
+    case 'edit_file':
+      return pickDefined({
+        ok: true,
+        path: payload.path,
+        absolutePath: payload.absolutePath,
+        replacementsApplied: payload.replacementsApplied,
+        changed: payload.changed,
+      })
+    case 'run_command':
+      return pickDefined({
+        ok: true,
+        command: payload.command,
+        args: payload.args,
+        cwd: payload.cwd,
+        exitCode: payload.exitCode,
+        timedOut: payload.timedOut,
+        durationMs: payload.durationMs,
+        stdoutBytes: byteLength(payload.stdout),
+        stderrBytes: byteLength(payload.stderr),
+      })
+    default:
+      return {
+        ok: true,
+        outputType: 'object',
+      }
+  }
+}
+
+function isRecoverableToolError(output: unknown): output is {error: Record<string, unknown>} {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    return false
+  }
+
+  const candidate = output as {ok?: unknown; error?: unknown}
+  return candidate.ok === false && !!candidate.error && typeof candidate.error === 'object' && !Array.isArray(candidate.error)
+}
+
+function pickDefined(input: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
+}
+
+function byteLength(value: unknown): number | undefined {
+  return typeof value === 'string' ? Buffer.byteLength(value, 'utf8') : undefined
 }

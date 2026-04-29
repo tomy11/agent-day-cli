@@ -134,6 +134,29 @@ Example:
 - Workspace path access is guarded by `WorkspacePathGuard`
 - High-risk tools require explicit approval
 
+## Safe Mutation And Command Tools
+
+The agent can request built-in tools through the default tool router:
+
+- `read_file` reads workspace files.
+- `write_file` creates or overwrites workspace files after approval.
+- `edit_file` applies exact patch-style text replacements after approval.
+- `run_command` runs a command with `shell: false`, a guarded workspace `cwd`, timeout handling, and captured output.
+
+Mutation and command tools are safe-by-default. Paths must stay inside the current workspace, protected directories such as `.git`, `node_modules`, and `dist` are blocked for writes, and dangerous commands such as `rm`, `sudo`, `chmod`, `dd`, `shutdown`, and `reboot` are denied before approval. High-risk tool calls ask for confirmation in interactive use.
+
+Examples:
+
+```bash
+./bin/run.js run "Create notes/todo.txt with a short todo list"
+./bin/run.js run "Change the heading in README.md from daycli to DayCLI"
+./bin/run.js run "Run npm test and summarize failures"
+```
+
+`write_file` rejects overwriting an existing file unless the model explicitly requests overwrite. `edit_file` uses exact `oldText` / `newText` replacements and reports conflicts when text is missing or ambiguous. `run_command` captures stdout, stderr, exit code, timeout state, and duration.
+
+Every tool call is persisted in `.daycli/sessions`. For write, edit, and command tools, session metadata includes compact audit fields such as changed path, bytes written, replacement count, command cwd, exit code, timeout state, and output byte counts.
+
 ## Development
 
 ```bash

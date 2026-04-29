@@ -11,7 +11,7 @@ import {
 } from '../core/agent'
 import {OllamaProvider} from '../core/providers'
 import {SafeExecutor} from '../core/execution'
-import {createDefaultToolRouter} from '../core/tools'
+import {buildToolSystemPrompt, createDefaultToolRouter} from '../core/tools'
 import {InteractiveApprovalManager, WorkspacePathGuard} from '../core/security'
 import {loadDaycliConfig, resolveRunSettings} from '../core/config'
 import {createLogger} from '../core/observability'
@@ -83,7 +83,12 @@ export default class Run extends Command {
       approvalManager: new InteractiveApprovalManager(),
     })
 
-    const systemMessages: AgentMessage[] = []
+    const systemMessages: AgentMessage[] = [
+      {
+        role: 'system',
+        content: buildToolSystemPrompt(router.list()),
+      },
+    ]
 
     if (flags.system) {
       systemMessages.push({role: 'system', content: flags.system})

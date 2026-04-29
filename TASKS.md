@@ -53,6 +53,22 @@
 - [x] M8 (Agent loop + real tool calling): add tests for successful tool use
 - [x] M8 (Agent loop + real tool calling): add tests for rejected approval, guard failure, and loop limit
 - [x] M8 (Agent loop + real tool calling): update `ARCHITECTURE.md` with agent loop sequence diagram
+- [x] M9 (Safe write/edit/run-command tools): define tool contracts for `write_file`, `edit_file`, and `run_command`
+- [x] M9 (Safe write/edit/run-command tools): extend safety policy with write paths, command allow/deny rules, and risk levels
+- [x] M9 (Safe write/edit/run-command tools): implement safe `write_file` tool with workspace path guard and approval
+- [x] M9 (Safe write/edit/run-command tools): implement safe `edit_file` tool with patch-style edits and conflict/error handling
+- [x] M9 (Safe write/edit/run-command tools): implement safe `run_command` tool with timeout, cwd guard, output capture, and approval
+- [x] M9 (Safe write/edit/run-command tools): register new tools in default tool router and expose them to agent prompts
+- [x] M9 (Safe write/edit/run-command tools): persist write/edit/run-command tool results and metadata in sessions
+- [x] M9 (Safe write/edit/run-command tools): add unit and E2E tests for allowed, rejected, blocked, timeout, and failure paths
+- [x] M9 (Safe write/edit/run-command tools): update `ARCHITECTURE.md` and usage docs for safe mutation and command execution
+- [ ] M10 (Batch mode + policy file + CI-friendly output): define batch mode CLI contract and non-interactive behavior
+- [ ] M10 (Batch mode + policy file + CI-friendly output): design policy file schema for approvals, allowed paths, commands, limits, and output mode
+- [ ] M10 (Batch mode + policy file + CI-friendly output): implement policy loader and validation with clear error codes
+- [ ] M10 (Batch mode + policy file + CI-friendly output): integrate policy decisions into approval and safe executor flow
+- [ ] M10 (Batch mode + policy file + CI-friendly output): add CI-friendly output modes such as plain, JSON, and exit codes
+- [ ] M10 (Batch mode + policy file + CI-friendly output): add batch execution tests for success, policy denial, tool failure, and deterministic output
+- [ ] M10 (Batch mode + policy file + CI-friendly output): update docs with CI examples and recommended safe defaults
 
 ## In Progress
 - [ ] (none)
