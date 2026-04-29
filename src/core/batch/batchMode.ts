@@ -1,13 +1,13 @@
 import {AppError} from '../errors'
 
-export type BatchApprovalMode = 'interactive' | 'deny_high_risk_without_policy'
-export type BatchOutputMode = 'plain' | 'rich'
+export type BatchApprovalMode = 'interactive' | 'policy'
+export type BatchOutputMode = 'plain' | 'rich' | 'json'
 
 export interface BatchModeContract {
   command: 'run'
   flag: '--batch'
   description: string
-  supportedOutputModes: readonly ['plain']
+  supportedOutputModes: readonly ['plain', 'json']
   nonInteractiveBehavior: {
     promptForApproval: false
     highRiskToolDefault: 'deny_without_policy'
@@ -27,13 +27,14 @@ export interface ResolvedBatchMode {
   output: BatchOutputMode
   approvalMode: BatchApprovalMode
   useRichOutput: boolean
+  useJsonOutput: boolean
 }
 
 export const BATCH_MODE_CLI_CONTRACT: BatchModeContract = {
   command: 'run',
   flag: '--batch',
   description: 'Run one task in non-interactive mode for scripts and CI.',
-  supportedOutputModes: ['plain'],
+  supportedOutputModes: ['plain', 'json'],
   nonInteractiveBehavior: {
     promptForApproval: false,
     highRiskToolDefault: 'deny_without_policy',
@@ -52,13 +53,14 @@ export function resolveBatchMode(input: ResolveBatchModeInput): ResolvedBatchMod
       output: input.output,
       approvalMode: 'interactive',
       useRichOutput: input.output === 'rich',
+      useJsonOutput: false,
     }
   }
 
-  if (input.output !== 'plain') {
+  if (input.output === 'rich') {
     throw new AppError(
       'CONFIG_INVALID',
-      'Batch mode currently supports only --output plain. JSON and CI output modes are planned for M10.',
+      'Batch mode does not support --output rich. Use plain or json.',
       {
         meta: {
           flag: BATCH_MODE_CLI_CONTRACT.flag,
@@ -71,8 +73,9 @@ export function resolveBatchMode(input: ResolveBatchModeInput): ResolvedBatchMod
   return {
     enabled: true,
     nonInteractive: true,
-    output: 'plain',
-    approvalMode: 'deny_high_risk_without_policy',
+    output: input.output,
+    approvalMode: 'policy',
     useRichOutput: false,
+    useJsonOutput: input.output === 'json',
   }
 }

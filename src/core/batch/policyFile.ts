@@ -1,6 +1,7 @@
 import {readFile} from 'node:fs/promises'
 import path from 'node:path'
 import {AppError} from '../errors'
+import {DEFAULT_SAFETY_POLICY, type SafetyPolicy} from '../security/safetyPolicy'
 
 export const DEFAULT_BATCH_POLICY_FILE = 'daycli.policy.json'
 export const BATCH_POLICY_SCHEMA_VERSION = 1
@@ -248,6 +249,21 @@ export const BATCH_POLICY_JSON_SCHEMA = {
     },
   },
 } as const
+
+export function policyToSafetyPolicy(policy: BatchPolicyFile): SafetyPolicy {
+  return {
+    paths: {
+      read: policy.paths?.read ?? {},
+      write: policy.paths?.write ?? {},
+      execute: policy.paths?.execute ?? {},
+    },
+    commands: {
+      allow: policy.commands?.allow,
+      deny: policy.commands?.deny,
+    },
+    tools: DEFAULT_SAFETY_POLICY.tools,
+  }
+}
 
 export async function loadBatchPolicy(
   workspaceRoot: string,

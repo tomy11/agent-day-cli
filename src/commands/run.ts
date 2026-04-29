@@ -8,6 +8,7 @@ import {
   summarizeAgentResult,
   type AgentEvent,
   type AgentMessage,
+  type AgentResult,
 } from '../core/agent'
 import {OllamaProvider} from '../core/providers'
 import {SafeExecutor} from '../core/execution'
@@ -19,7 +20,7 @@ import {toAppError} from '../core/errors'
 import {buildCodeContext} from '../core/retrieval'
 import {SessionStore} from '../core/storage'
 import {RunResultView} from '../ui'
-import {resolveBatchMode} from '../core/batch'
+import {resolveBatchMode, loadBatchPolicy, policyToSafetyPolicy, PolicyApprovalManager} from '../core/batch'
 
 export default class Run extends Command {
   static override description = 'Run a single task prompt'
@@ -47,7 +48,7 @@ export default class Run extends Command {
     }),
     output: Flags.string({
       description: 'Output formatter mode',
-      options: ['plain', 'rich'],
+      options: ['plain', 'rich', 'json'],
       default: 'plain',
     }),
     batch: Flags.boolean({
@@ -66,7 +67,7 @@ export default class Run extends Command {
     logger.info('command.start', 'run command started')
     const batchMode = resolveBatchMode({
       batch: flags.batch,
-      output: flags.output as 'plain' | 'rich',
+      output: flags.output as 'plain' | 'rich' | 'json',
     })
 
     const config = await loadDaycliConfig(workspaceRoot)
@@ -86,12 +87,34 @@ export default class Run extends Command {
       timeoutMs: settings.timeoutMs,
     })
     const router = createDefaultToolRouter()
+
+    let batchSafetyPolicy
+    let batchApprovalManager
+    let batchPolicyLimits
+    let batchPolicyOutput
+    if (batchMode.enabled) {
+      const loaded = await loadBatchPolicy(workspaceRoot)
+      batchSafetyPolicy = policyToSafetyPolicy(loaded.policy)
+      batchApprovalManager = new PolicyApprovalManager(loaded.policy)
+      batchPolicyLimits = loaded.policy.limits
+      batchPolicyOutput = loaded.policy.output
+      logger.info('batch.policy.loaded', 'batch policy loaded', {
+        source: loaded.source,
+        path: loaded.path,
+      })
+    }
+
+    // Policy output.mode overrides the default 'plain' flag (user explicit --output json takes precedence)
+    const useJsonOutput =
+      flags.output === 'json' || (batchMode.enabled && batchPolicyOutput?.mode === 'json' && flags.output === 'plain')
+    const includeSessionId = batchMode.enabled ? (batchPolicyOutput?.includeSessionId ?? true) : true
+    const includeMetadata = batchMode.enabled ? (batchPolicyOutput?.includeMetadata ?? false) : false
+
     const executor = new SafeExecutor({
       toolRouter: router,
-      pathGuard: new WorkspacePathGuard(),
-      ...(batchMode.approvalMode === 'interactive'
-        ? {approvalManager: new InteractiveApprovalManager()}
-        : {}),
+      pathGuard: new WorkspacePathGuard(batchSafetyPolicy),
+      approvalManager: batchApprovalManager ?? new InteractiveApprovalManager(),
+      safetyPolicy: batchSafetyPolicy,
     })
 
     const systemMessages: AgentMessage[] = [
@@ -106,6 +129,7 @@ export default class Run extends Command {
     }
 
     let retrievalSummary: {chunkCount: number; truncated: boolean} | undefined
+    let nonFinalStop = false
 
     try {
       const session = await sessionStore.create({
@@ -197,7 +221,9 @@ export default class Run extends Command {
         provider,
         toolExecutor: executor,
         limits: {
-          timeoutMs: settings.timeoutMs,
+          timeoutMs: batchPolicyLimits?.runTimeoutMs ?? settings.timeoutMs,
+          ...(batchPolicyLimits?.maxSteps !== undefined ? {maxSteps: batchPolicyLimits.maxSteps} : {}),
+          ...(batchPolicyLimits?.maxToolCalls !== undefined ? {maxToolCalls: batchPolicyLimits.maxToolCalls} : {}),
         },
         onEvent: event => {
           logAgentEvent(logger, event, {sessionId})
@@ -236,27 +262,34 @@ export default class Run extends Command {
         sessionId,
       })
 
-      if (batchMode.useRichOutput) {
+      if (useJsonOutput) {
+        this.log(formatJsonRunOutput({
+          agentResult,
+          model: responseModel,
+          sessionId: includeSessionId ? sessionId : undefined,
+          includeMetadata,
+        }))
+      } else if (batchMode.useRichOutput) {
         if (!process.stdout.isTTY || !process.stdin.isTTY) {
           logger.warn('output.rich.unavailable', 'rich output requires TTY; falling back to plain')
           this.log(formatPlainRunOutput(agentResult.finalMessage.content, sessionId))
-          return
+        } else {
+          const app = render(
+            React.createElement(RunResultView, {
+              task: args.task,
+              model: responseModel,
+              response: agentResult.finalMessage.content,
+              sessionId,
+              retrieval: retrievalSummary,
+            }),
+          )
+          await app.waitUntilExit()
         }
-
-        const app = render(
-          React.createElement(RunResultView, {
-            task: args.task,
-            model: responseModel,
-            response: agentResult.finalMessage.content,
-            sessionId,
-            retrieval: retrievalSummary,
-          }),
-        )
-        await app.waitUntilExit()
-        return
+      } else {
+        this.log(formatPlainRunOutput(agentResult.finalMessage.content, sessionId))
       }
 
-      this.log(formatPlainRunOutput(agentResult.finalMessage.content, sessionId))
+      nonFinalStop = batchMode.enabled && agentResult.stoppedReason !== 'final_answer'
     } catch (error) {
       if (sessionId) {
         try {
@@ -274,7 +307,17 @@ export default class Run extends Command {
         code: appError.code,
         ...(appError.meta ?? {}),
       })
-      this.error(`[${appError.code}] ${appError.message}`, {exit: 1})
+
+      if (useJsonOutput) {
+        this.log(formatJsonErrorOutput(appError, sessionId))
+        this.exit(1)
+      } else {
+        this.error(`[${appError.code}] ${appError.message}`, {exit: 1})
+      }
+    }
+
+    if (nonFinalStop) {
+      this.exit(2)
     }
   }
 }
@@ -348,4 +391,40 @@ function summarizeAgentEvent(event: AgentEvent): Record<string, unknown> {
   return {
     stepIndex: step.index,
   }
+}
+
+function formatJsonRunOutput(options: {
+  agentResult: AgentResult
+  model: string
+  sessionId: string | undefined
+  includeMetadata: boolean
+}): string {
+  const {agentResult, model, sessionId, includeMetadata} = options
+  const output: Record<string, unknown> = {
+    status: agentResult.stoppedReason === 'final_answer' ? 'completed' : 'stopped',
+    stoppedReason: agentResult.stoppedReason,
+    response: agentResult.finalMessage.content,
+  }
+  if (sessionId !== undefined) output.sessionId = sessionId
+  if (includeMetadata) {
+    output.metadata = {
+      model,
+      stepCount: agentResult.steps.length,
+      toolResultCount: agentResult.toolResults.length,
+    }
+  }
+
+  return JSON.stringify(output, null, 2)
+}
+
+function formatJsonErrorOutput(error: {code: string; message: string}, sessionId: string | undefined): string {
+  const output: Record<string, unknown> = {
+    status: 'error',
+    error: {
+      code: error.code,
+      message: error.message,
+    },
+  }
+  if (sessionId !== undefined) output.sessionId = sessionId
+  return JSON.stringify(output, null, 2)
 }

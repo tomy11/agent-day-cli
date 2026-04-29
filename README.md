@@ -161,19 +161,54 @@ Every tool call is persisted in `.daycli/sessions`. For write, edit, and command
 
 ## Batch Mode
 
-`daycli run "<task>" --batch` defines the non-interactive CLI contract for scripts and CI:
+`daycli run "<task>" --batch` runs non-interactively for scripts and CI:
 
 - runs only as a one-shot `run` command
 - never opens the rich Ink UI
-- never prompts for approval
-- uses plain output for now
+- never prompts for approval — tool decisions are driven by the active policy
+- supports `plain` (default) and `json` output modes
 - persists the session like a normal run
 
-Until policy files are implemented later in M10, high-risk tools such as `write_file`, `edit_file`, and `run_command` are denied in batch mode instead of prompting. Low-risk tools such as `read_file` can still run through the normal guards.
+**Exit codes**
 
-### Policy File Schema
+| Code | Meaning |
+|------|---------|
+| `0` | Agent produced a final answer |
+| `1` | Command error (invalid config, session failure, etc.) |
+| `2` | Agent stopped early (`step_limit`, `tool_call_limit`, or `timeout`) |
 
-M10 policy files use `daycli.policy.json` with schema version `1`. The schema covers approval decisions, workspace path rules, command allow/deny rules, run limits, and output mode.
+**CI examples**
+
+```bash
+# Plain output — response text followed by session info
+./bin/run.js run "summarize this project" --batch
+
+# JSON output — machine-readable, safe to pipe and parse
+./bin/run.js run "check for lint errors" --batch --output json
+
+# Policy file is loaded automatically from daycli.policy.json in the workspace
+./bin/run.js run "run the test suite and report failures" --batch
+```
+
+**JSON output format**
+
+```json
+{
+  "status": "completed",
+  "stoppedReason": "final_answer",
+  "response": "...",
+  "sessionId": "20260429125510-59a4e79b-...",
+  "metadata": {"model": "llama3.1", "stepCount": 3, "toolResultCount": 2}
+}
+```
+
+`status` is `"completed"` when `stoppedReason` is `"final_answer"` and `"stopped"` for all other reasons. `metadata` is only included when `output.includeMetadata: true` is set in the policy. On error, `status` is `"error"` and the JSON contains an `error` field instead of `response`.
+
+### Policy File
+
+Create `daycli.policy.json` in the workspace root to control tool approvals, path access, command rules, agent limits, and output format. If the file is absent, the conservative default policy applies: reads are allowed and all writes and commands are denied.
+
+**Full schema example:**
 
 ```json
 {
@@ -216,7 +251,51 @@ M10 policy files use `daycli.policy.json` with schema version `1`. The schema co
 }
 ```
 
-The policy loader validates this file before use. Missing default policy files fall back to the conservative default policy; explicit missing policy paths fail with `POLICY_NOT_FOUND`. Invalid JSON, unsupported schema versions, unknown keys, wrong value types, and unsafe policy paths fail with `POLICY_INVALID`. File-system read failures use `POLICY_IO_ERROR`.
+The policy loader validates the file before use. Missing default policy files fall back to the conservative default; explicit missing paths fail with `POLICY_NOT_FOUND`. Invalid JSON, unsupported schema versions, unknown keys, wrong value types, and out-of-workspace paths fail with `POLICY_INVALID`. File-system read failures use `POLICY_IO_ERROR`.
+
+**Recommended safe defaults**
+
+For read-only analysis (code review, summarisation, Q&A):
+
+```json
+{
+  "version": 1,
+  "output": {"mode": "json", "includeSessionId": true}
+}
+```
+
+For CI with controlled write access (e.g. writing reports):
+
+```json
+{
+  "version": 1,
+  "approvals": {
+    "tools": {"read_file": "allow", "write_file": "allow", "edit_file": "deny", "run_command": "deny"}
+  },
+  "paths": {
+    "write": {"allow": ["reports/**"], "deny": [".git/**", "node_modules/**", "dist/**"]}
+  },
+  "limits": {"maxSteps": 8, "maxToolCalls": 4, "runTimeoutMs": 120000},
+  "output": {"mode": "json", "includeSessionId": true, "includeMetadata": true}
+}
+```
+
+For CI that can also run commands (e.g. test runners):
+
+```json
+{
+  "version": 1,
+  "approvals": {
+    "tools": {"read_file": "allow", "run_command": "allow", "write_file": "deny", "edit_file": "deny"}
+  },
+  "paths": {
+    "execute": {"allow": ["."], "deny": [".git/**", "node_modules/**"]}
+  },
+  "commands": {"allow": ["npm", "node", "npx"], "deny": ["rm", "sudo", "chmod", "dd", "shutdown", "reboot"]},
+  "limits": {"maxSteps": 12, "maxToolCalls": 6, "runTimeoutMs": 180000, "commandTimeoutMs": 30000},
+  "output": {"mode": "json", "includeSessionId": true, "includeMetadata": true}
+}
+```
 
 ## Development
 

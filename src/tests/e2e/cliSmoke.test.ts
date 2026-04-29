@@ -651,23 +651,203 @@ test('run command batch mode denies high-risk tools without prompting', async t 
 
   const toolMessage = await readOnlyToolMessage(workspace, 'write_file')
   assert.ok(toolMessage)
-  assert.deepEqual(toolMessage.metadata?.toolResult, {
-    ok: false,
-    error: {
-      code: 'TOOL_APPROVAL_REQUIRED',
-      message: 'Approval manager is required for high-risk tool: write_file',
-      recoverable: true,
-      meta: {
-        toolName: 'write_file',
-      },
-    },
-  })
+  const toolResult = toolMessage.metadata?.toolResult as {
+    ok: boolean
+    error: {code: string; message: string; recoverable: boolean; meta: Record<string, unknown>}
+  }
+  assert.equal(toolResult.ok, false)
+  assert.equal(toolResult.error.code, 'TOOL_PATH_BLOCKED')
+  assert.match(toolResult.error.message, /Path is not allowed for write/)
+  assert.equal(toolResult.error.recoverable, true)
+  assert.equal(toolResult.error.meta.toolName, 'write_file')
 
   const session = await readOnlySession(workspace)
   assert.equal(session.metadata?.batch, true)
   assert.equal(session.metadata?.nonInteractive, true)
-  assert.equal(session.metadata?.approvalMode, 'deny_high_risk_without_policy')
+  assert.equal(session.metadata?.approvalMode, 'policy')
   assert.equal(requests.length, 2)
+})
+
+test('run command batch mode produces valid JSON output on success', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-batch-json-success-'))
+  const requests: MockChatRequest[] = []
+  const server = createToolLoopServer({
+    requests,
+    firstContent: 'Batch run completed successfully.',
+    finalContent: 'Batch run completed successfully.',
+  })
+
+  await listen(server)
+  t.after(async () => {
+    await close(server)
+    await rm(workspace, {recursive: true, force: true})
+  })
+
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+
+  const runResult = await runCliAsync(
+    [...createMockRunArgs('hello batch', address.port), '--batch', '--output', 'json'],
+    workspace,
+  )
+
+  assert.equal(runResult.status, 0)
+
+  const output = JSON.parse(runResult.stdout) as Record<string, unknown>
+  assert.equal(output.status, 'completed')
+  assert.equal(output.stoppedReason, 'final_answer')
+  assert.match(String(output.response), /Batch run completed successfully/)
+  assert.equal(typeof output.sessionId, 'string')
+  assert.equal(output.metadata, undefined)
+  assert.deepEqual(Object.keys(output).sort(), ['response', 'sessionId', 'status', 'stoppedReason'])
+  assert.equal(requests.length, 1)
+})
+
+test('run command batch mode denies high-risk tools via policy approval rules', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-batch-approval-denial-'))
+
+  await writeFile(
+    path.join(workspace, 'daycli.policy.json'),
+    JSON.stringify({
+      version: 1,
+      approvals: {
+        default: 'deny',
+        riskLevels: {low: 'allow', high: 'deny'},
+      },
+      paths: {
+        write: {allow: ['**']},
+      },
+    }),
+  )
+
+  const requests: MockChatRequest[] = []
+  const server = createToolLoopServer({
+    requests,
+    firstContent: JSON.stringify({
+      content: 'Writing a file',
+      toolCalls: [{id: 'call-1', name: 'write_file', input: {path: 'output.txt', content: 'data\n'}}],
+    }),
+    finalContent: 'Write was rejected by policy.',
+  })
+
+  await listen(server)
+  t.after(async () => {
+    await close(server)
+    await rm(workspace, {recursive: true, force: true})
+  })
+
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+
+  const runResult = await runCliAsync(
+    [...createMockRunArgs('write a file', address.port), '--batch'],
+    workspace,
+  )
+
+  assert.equal(runResult.status, 0)
+  assert.doesNotMatch(runResult.stdout, /Approve execution/)
+
+  await assert.rejects(
+    () => readFile(path.join(workspace, 'output.txt'), 'utf8'),
+    (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT',
+  )
+
+  const toolMessage = await readOnlyToolMessage(workspace, 'write_file')
+  assert.ok(toolMessage)
+  const toolResult = toolMessage.metadata?.toolResult as {
+    ok: boolean
+    error: {code: string; recoverable: boolean}
+  }
+  assert.equal(toolResult.ok, false)
+  assert.equal(toolResult.error.code, 'TOOL_APPROVAL_REJECTED')
+  assert.equal(toolResult.error.recoverable, true)
+  assert.equal(requests.length, 2)
+})
+
+test('run command batch mode feeds tool execution failure back to agent', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-batch-toolfail-'))
+  const requests: MockChatRequest[] = []
+  const server = createToolLoopServer({
+    requests,
+    firstContent: JSON.stringify({
+      content: 'Reading a file',
+      toolCalls: [{id: 'call-1', name: 'read_file', input: {path: 'does_not_exist.txt'}}],
+    }),
+    finalContent: 'The file was not found.',
+  })
+
+  await listen(server)
+  t.after(async () => {
+    await close(server)
+    await rm(workspace, {recursive: true, force: true})
+  })
+
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+
+  const runResult = await runCliAsync(
+    [...createMockRunArgs('read a file', address.port), '--batch'],
+    workspace,
+  )
+
+  assert.equal(runResult.status, 0)
+  assert.match(runResult.stdout, /The file was not found/)
+
+  const toolMessage = await readOnlyToolMessage(workspace, 'read_file')
+  assert.ok(toolMessage)
+  const toolResult = toolMessage.metadata?.toolResult as {
+    ok: boolean
+    error: {code: string; recoverable: boolean}
+  }
+  assert.equal(toolResult.ok, false)
+  assert.equal(typeof toolResult.error.code, 'string')
+  assert.equal(toolResult.error.recoverable, true)
+  assert.equal(requests.length, 2)
+})
+
+test('run command batch mode exits with code 2 and JSON stoppedReason when step limit is reached', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-batch-steplimit-'))
+
+  await writeFile(
+    path.join(workspace, 'daycli.policy.json'),
+    JSON.stringify({
+      version: 1,
+      limits: {maxSteps: 1},
+    }),
+  )
+
+  const requests: MockChatRequest[] = []
+  const toolCallContent = JSON.stringify({
+    content: 'Calling a tool',
+    toolCalls: [{id: 'call-1', name: 'read_file', input: {path: 'README.md'}}],
+  })
+  const server = createToolLoopServer({
+    requests,
+    firstContent: toolCallContent,
+    finalContent: toolCallContent,
+  })
+
+  await listen(server)
+  t.after(async () => {
+    await close(server)
+    await rm(workspace, {recursive: true, force: true})
+  })
+
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+
+  const runResult = await runCliAsync(
+    [...createMockRunArgs('do something', address.port), '--batch', '--output', 'json'],
+    workspace,
+  )
+
+  assert.equal(runResult.status, 2)
+
+  const output = JSON.parse(runResult.stdout) as Record<string, unknown>
+  assert.equal(output.status, 'stopped')
+  assert.equal(output.stoppedReason, 'step_limit')
+  assert.equal(typeof output.sessionId, 'string')
+  assert.equal(requests.length, 1)
 })
 
 function listen(server: Server): Promise<void> {

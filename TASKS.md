@@ -65,10 +65,10 @@
 - [x] M10 (Batch mode + policy file + CI-friendly output): define batch mode CLI contract and non-interactive behavior
 - [x] M10 (Batch mode + policy file + CI-friendly output): design policy file schema for approvals, allowed paths, commands, limits, and output mode
 - [x] M10 (Batch mode + policy file + CI-friendly output): implement policy loader and validation with clear error codes
-- [ ] M10 (Batch mode + policy file + CI-friendly output): integrate policy decisions into approval and safe executor flow
-- [ ] M10 (Batch mode + policy file + CI-friendly output): add CI-friendly output modes such as plain, JSON, and exit codes
-- [ ] M10 (Batch mode + policy file + CI-friendly output): add batch execution tests for success, policy denial, tool failure, and deterministic output
-- [ ] M10 (Batch mode + policy file + CI-friendly output): update docs with CI examples and recommended safe defaults
+- [x] M10 (Batch mode + policy file + CI-friendly output): integrate policy decisions into approval and safe executor flow
+- [x] M10 (Batch mode + policy file + CI-friendly output): add CI-friendly output modes such as plain, JSON, and exit codes
+- [x] M10 (Batch mode + policy file + CI-friendly output): add batch execution tests for success, policy denial, tool failure, and deterministic output
+- [x] M10 (Batch mode + policy file + CI-friendly output): update docs with CI examples and recommended safe defaults
 
 ## In Progress
 - [ ] (none)

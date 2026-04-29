@@ -163,15 +163,14 @@ Tool results are persisted as session messages with role `tool`. Mutation and co
 This keeps session history useful for debugging without storing unnecessarily large command output in metadata.
 
 ## Batch Mode Contract
-`daycli run "<task>" --batch` is the M10 entrypoint for non-interactive execution.
+`daycli run "<task>" --batch` is the non-interactive execution contract for scripts and CI.
 
 - Scope: batch mode applies only to `run`, not `chat`.
-- UI: batch mode never renders Ink/rich UI and currently supports plain output only.
-- Approval: batch mode never opens an approval prompt. Until policy files are available, high-risk tools fail with `TOOL_APPROVAL_REQUIRED` and are fed back to the agent loop as recoverable tool errors.
+- UI: batch mode never renders Ink/rich UI. Supports `plain` (default) and `json` output modes.
+- Approval: batch mode never prompts for approval. All tool decisions are made by `PolicyApprovalManager` using the active `daycli.policy.json` (or the conservative default if the file is absent).
 - Safety: workspace path guard, command policy, and tool risk levels still run before execution.
 - Sessions: batch runs create normal `run` sessions with metadata fields `batch`, `nonInteractive`, and `approvalMode`.
-
-Later M10 tasks will add policy files and CI-friendly output modes on top of this contract.
+- Exit codes: `0` = final answer, `1` = command error, `2` = agent stopped early (step_limit / tool_call_limit / timeout).
 
 ### Policy File Schema
 The batch policy file contract lives in `src/core/batch/policyFile.ts`. Default filename: `daycli.policy.json`; schema version: `1`.
@@ -192,7 +191,8 @@ The loader resolves `daycli.policy.json` inside the workspace by default, valida
 - `src/cli/*` : command entrypoints (oclif)
 - `src/providers/OllamaProvider.ts` : เชื่อม Ollama API
 - `src/core/batch/batchMode.ts` : batch CLI contract and non-interactive behavior
-- `src/core/batch/policyFile.ts` : batch policy schema, loader, and validation for approvals, paths, commands, limits, and output
+- `src/core/batch/policyFile.ts` : batch policy schema, loader, validation, and `policyToSafetyPolicy` converter
+- `src/core/batch/policyApprovalManager.ts` : approval manager that evaluates tool calls against the loaded batch policy
 - `src/tools/toolRouter.ts` : map tool name -> handler
 - `src/execution/safeExecutor.ts` : บังคับ policy ก่อน execute
 - `src/core/tools/contracts.ts` : shared tool input contracts and risk metadata
