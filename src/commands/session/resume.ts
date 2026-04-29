@@ -1,11 +1,15 @@
 import React from 'react'
 import {Args, Command, Flags} from '@oclif/core'
 import {render} from 'ink'
+import {createAgentBackedProvider, persistAgentToolResults, type AgentEvent} from '../../core/agent'
 import {loadDaycliConfig, resolveRunSettings} from '../../core/config'
+import {SafeExecutor} from '../../core/execution'
 import {toAppError} from '../../core/errors'
 import {createLogger} from '../../core/observability'
 import {OllamaProvider} from '../../core/providers'
+import {InteractiveApprovalManager, WorkspacePathGuard} from '../../core/security'
 import {SessionStore, type SessionMessageRole, type SessionRecord} from '../../core/storage'
+import {createDefaultToolRouter} from '../../core/tools'
 import {buildWorkspaceSummary} from '../../core/workspace'
 import {ChatApp} from '../../ui'
 
@@ -61,6 +65,42 @@ export default class SessionResume extends Command {
         baseUrl: settings.baseUrl,
         timeoutMs: settings.timeoutMs,
       })
+      const executor = new SafeExecutor({
+        toolRouter: createDefaultToolRouter(),
+        pathGuard: new WorkspacePathGuard(),
+        approvalManager: new InteractiveApprovalManager(),
+      })
+      const chatProvider = createAgentBackedProvider({
+        provider,
+        toolExecutor: executor,
+        toolContext: {
+          workspaceRoot,
+        },
+        limits: {
+          timeoutMs: settings.timeoutMs,
+        },
+        onEvent: event => {
+          logAgentEvent(logger, event, {sessionId: session.id})
+        },
+        onResult: result => {
+          logger.info('agent.chat.done', 'resumed chat agent turn completed', {
+            sessionId: session.id,
+            stoppedReason: result.stoppedReason,
+            stepCount: result.steps.length,
+            toolResultCount: result.toolResults.length,
+          })
+          void persistAgentToolResults({
+            sessionStore,
+            sessionId: session.id,
+            result,
+          }).catch(error => {
+            logger.warn('session.agent_tools.failed', 'failed to persist resumed chat agent tool results', {
+              sessionId: session.id,
+              error: error instanceof Error ? error.message : String(error),
+            })
+          })
+        },
+      })
 
       if (session.status !== 'active') {
         await sessionStore.updateStatus(session.id, 'active')
@@ -101,7 +141,7 @@ export default class SessionResume extends Command {
       const app = render(
         React.createElement(ChatApp, {
           model: settings.model,
-          provider,
+          provider: chatProvider,
           systemPrompt: systemPromptParts.length > 0 ? systemPromptParts.join('\n\n') : undefined,
           sessionId: session.id,
           initialMessages: session.messages
@@ -115,6 +155,7 @@ export default class SessionResume extends Command {
               await sessionStore.appendMessage(session.id, {
                 role: toSessionMessageRole(message.role),
                 content: message.content,
+                ...(message.metadata !== undefined ? {metadata: message.metadata} : {}),
               })
               logger.debug('session.message.persisted', 'resumed chat message persisted', {
                 sessionId: session.id,
@@ -165,4 +206,48 @@ function toUiMessageRole(role: SessionMessageRole): 'system' | 'user' | 'assista
 
 function toSessionMessageRole(role: 'system' | 'user' | 'assistant'): SessionMessageRole {
   return role
+}
+
+function logAgentEvent(
+  logger: ReturnType<typeof createLogger>,
+  event: AgentEvent,
+  context: Record<string, unknown>,
+): void {
+  logger.info(`agent.${event.kind}`, `agent event: ${event.kind}`, {
+    ...context,
+    ...summarizeAgentEvent(event),
+  })
+}
+
+function summarizeAgentEvent(event: AgentEvent): Record<string, unknown> {
+  if (event.kind === 'stopped') {
+    return {
+      stoppedReason: event.stoppedReason,
+    }
+  }
+
+  const step = event.step
+  if (!step) {
+    return {}
+  }
+
+  if (step.kind === 'tool_call') {
+    return {
+      stepIndex: step.index,
+      toolCallId: step.toolCall.id,
+      toolName: step.toolCall.name,
+    }
+  }
+
+  if (step.kind === 'tool_result') {
+    return {
+      stepIndex: step.index,
+      toolCallId: step.toolCall.id,
+      toolName: step.result.toolName,
+    }
+  }
+
+  return {
+    stepIndex: step.index,
+  }
 }

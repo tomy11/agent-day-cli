@@ -12,6 +12,7 @@ import {DEFAULT_UI_THEME} from './theme'
 interface UiMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
+  metadata?: Record<string, unknown>
 }
 
 interface ChatAppProps {
@@ -131,6 +132,10 @@ export function ChatApp({
       })
 
       const assistantMessage: UiMessage = {role: 'assistant', content: response.content}
+      const assistantMetadata = extractAgentMetadata(response.raw)
+      if (assistantMetadata) {
+        assistantMessage.metadata = assistantMetadata
+      }
       conversationRef.current = [...conversationRef.current, {role: 'assistant', content: response.content}]
       setMessages(previous => [...previous, assistantMessage])
       await persistChatMessage(assistantMessage)
@@ -198,5 +203,58 @@ export function ChatApp({
         setStatusTone('warning')
       }
     }
+  }
+}
+
+function extractAgentMetadata(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined
+  }
+
+  const candidate = raw as {
+    stoppedReason?: unknown
+    steps?: unknown
+    toolResults?: unknown
+  }
+
+  if (typeof candidate.stoppedReason !== 'string' || !Array.isArray(candidate.steps)) {
+    return undefined
+  }
+
+  return {
+    agent: {
+      stoppedReason: candidate.stoppedReason,
+      stepCount: candidate.steps.length,
+      toolResultCount: Array.isArray(candidate.toolResults) ? candidate.toolResults.length : 0,
+      steps: candidate.steps.map(summarizeRawAgentStep),
+    },
+  }
+}
+
+function summarizeRawAgentStep(step: unknown): Record<string, unknown> {
+  if (!step || typeof step !== 'object' || Array.isArray(step)) {
+    return {
+      kind: 'unknown',
+    }
+  }
+
+  const candidate = step as {
+    kind?: unknown
+    index?: unknown
+    createdAt?: unknown
+    toolCall?: {id?: unknown; name?: unknown}
+    result?: {toolName?: unknown}
+  }
+
+  return {
+    kind: candidate.kind,
+    index: candidate.index,
+    createdAt: candidate.createdAt,
+    ...(typeof candidate.toolCall?.id === 'string' ? {toolCallId: candidate.toolCall.id} : {}),
+    ...(typeof candidate.result?.toolName === 'string'
+      ? {toolName: candidate.result.toolName}
+      : typeof candidate.toolCall?.name === 'string'
+        ? {toolName: candidate.toolCall.name}
+        : {}),
   }
 }

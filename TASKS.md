@@ -39,15 +39,16 @@
 - [x] M7 (Session persistence): add E2E smoke test for resume flow
 - [x] M7 (Session persistence): add E2E coverage for session id and resume hints
 - [x] M7 (Session persistence): update `ARCHITECTURE.md` and usage docs with session lifecycle
-- [ ] M8 (Agent loop + real tool calling): define provider tool-call contract and message format
-- [ ] M8 (Agent loop + real tool calling): add an agent orchestrator in `src/core/agent`
-- [ ] M8 (Agent loop + real tool calling): implement loop limits for max steps, max tool calls, and timeout
-- [ ] M8 (Agent loop + real tool calling): route model-requested tool calls through `SafeExecutor`
-- [ ] M8 (Agent loop + real tool calling): feed tool results back into the model until final answer
-- [ ] M8 (Agent loop + real tool calling): support tool-call events for UI rendering and structured logs
-- [ ] M8 (Agent loop + real tool calling): integrate agent loop into `daycli run`
-- [ ] M8 (Agent loop + real tool calling): integrate agent loop into `daycli chat`
-- [ ] M8 (Agent loop + real tool calling): persist agent steps and tool results into sessions
+- [x] M8 (Agent loop + real tool calling): define provider tool-call contract and message format
+- [x] M8 (Agent loop + real tool calling): add an agent orchestrator in `src/core/agent`
+- [x] M8 (Agent loop + real tool calling): support final-answer-only loop with max-step and timeout guards
+- [x] M8 (Agent loop + real tool calling): implement loop limits for max steps, max tool calls, and timeout
+- [x] M8 (Agent loop + real tool calling): route model-requested tool calls through `SafeExecutor`
+- [x] M8 (Agent loop + real tool calling): feed tool results back into the model until final answer
+- [x] M8 (Agent loop + real tool calling): support tool-call events for UI rendering and structured logs
+- [x] M8 (Agent loop + real tool calling): integrate agent loop into `daycli run`
+- [x] M8 (Agent loop + real tool calling): integrate agent loop into `daycli chat`
+- [x] M8 (Agent loop + real tool calling): persist agent steps and tool results into sessions
 - [ ] M8 (Agent loop + real tool calling): handle malformed/unknown tool calls with recoverable errors
 - [ ] M8 (Agent loop + real tool calling): add tests for successful tool use, rejected approval, guard failure, and loop limit
 - [ ] M8 (Agent loop + real tool calling): update `ARCHITECTURE.md` with agent loop sequence diagram

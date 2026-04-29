@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import {tmpdir} from 'node:os'
-import {mkdtemp, readFile, readdir, rm} from 'node:fs/promises'
+import {mkdtemp, readFile, readdir, rm, writeFile} from 'node:fs/promises'
 import {spawn, spawnSync} from 'node:child_process'
 import {createServer, type Server} from 'node:http'
 
@@ -179,6 +179,121 @@ test('run command persists a completed run session', async t => {
   assert.match(resumeResult.stdout, /Title: remember this task/)
   assert.match(resumeResult.stdout, /Messages: 2/)
   assert.match(resumeResult.stdout, /Run this command in an interactive terminal to continue the session\./)
+})
+
+test('run command routes model-requested read_file tool calls through the agent loop', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-run-tool-'))
+  await writeFile(path.join(workspace, 'README.md'), 'daycli tool loop works\n', 'utf8')
+
+  const requests: Array<{messages?: Array<{role?: string; content?: string}>}> = []
+  const server = createServer((request, response) => {
+    if (request.method !== 'POST' || request.url !== '/api/chat') {
+      response.writeHead(404)
+      response.end()
+      return
+    }
+
+    const chunks: Buffer[] = []
+    request.on('data', chunk => chunks.push(Buffer.from(chunk)))
+    request.on('end', () => {
+      requests.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as {messages?: Array<{role?: string; content?: string}>})
+
+      response.writeHead(200, {'content-type': 'application/json'})
+      if (requests.length === 1) {
+        response.end(
+          JSON.stringify({
+            model: 'mock-model',
+            message: {
+              role: 'assistant',
+              content: JSON.stringify({
+                content: 'Reading README.md',
+                toolCalls: [
+                  {
+                    id: 'call-1',
+                    name: 'read_file',
+                    input: {
+                      path: 'README.md',
+                    },
+                  },
+                ],
+              }),
+            },
+          }),
+        )
+        return
+      }
+
+      response.end(
+        JSON.stringify({
+          model: 'mock-model',
+          message: {
+            role: 'assistant',
+            content: 'The README confirms the tool loop works.',
+          },
+        }),
+      )
+    })
+  })
+
+  await listen(server)
+
+  t.after(async () => {
+    await close(server)
+    await rm(workspace, {recursive: true, force: true})
+  })
+
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+
+  const runResult = await runCliAsync(
+    [
+      'run',
+      'Use read_file to inspect README.md',
+      '--model',
+      'mock-model',
+      '--base-url',
+      `http://127.0.0.1:${address.port}`,
+      '--timeout-ms',
+      '1000',
+    ],
+    workspace,
+  )
+
+  assert.equal(runResult.status, 0)
+  assert.match(runResult.stdout, /The README confirms the tool loop works\./)
+  assert.equal(requests.length, 2)
+  assert.match(
+    requests[1]?.messages?.at(-1)?.content ?? '',
+    /Tool result from read_file \(call-1\):/,
+  )
+  assert.match(requests[1]?.messages?.at(-1)?.content ?? '', /daycli tool loop works/)
+
+  const sessionDir = path.join(workspace, '.daycli', 'sessions')
+  const sessionFiles = (await readdir(sessionDir)).filter(file => file.endsWith('.json'))
+  assert.equal(sessionFiles.length, 1)
+  const sessionRaw = await readFile(path.join(sessionDir, sessionFiles[0] ?? ''), 'utf8')
+  const session = JSON.parse(sessionRaw) as {
+    messages?: Array<{
+      role?: string
+      content?: string
+      toolName?: string
+      metadata?: {
+        agent?: {
+          stoppedReason?: string
+          stepCount?: number
+          toolResultCount?: number
+        }
+      }
+    }>
+  }
+  const toolMessage = session.messages?.find(message => message.role === 'tool')
+  assert.equal(toolMessage?.toolName, 'read_file')
+  assert.match(toolMessage?.content ?? '', /daycli tool loop works/)
+
+  const assistantMessage = session.messages?.find(message => message.role === 'assistant')
+  assert.equal(assistantMessage?.metadata?.agent?.stoppedReason, 'final_answer')
+  assert.equal(assistantMessage?.metadata?.agent?.toolResultCount, 1)
+  assert.equal(assistantMessage?.metadata?.agent?.stepCount, 5)
 })
 
 function listen(server: Server): Promise<void> {

@@ -2,6 +2,13 @@ import React from 'react'
 import {Args, Command} from '@oclif/core'
 import {Flags} from '@oclif/core'
 import {render} from 'ink'
+import {
+  AgentOrchestrator,
+  persistAgentToolResults,
+  summarizeAgentResult,
+  type AgentEvent,
+  type AgentMessage,
+} from '../core/agent'
 import {OllamaProvider} from '../core/providers'
 import {SafeExecutor} from '../core/execution'
 import {createDefaultToolRouter} from '../core/tools'
@@ -69,8 +76,14 @@ export default class Run extends Command {
       baseUrl: settings.baseUrl,
       timeoutMs: settings.timeoutMs,
     })
+    const router = createDefaultToolRouter()
+    const executor = new SafeExecutor({
+      toolRouter: router,
+      pathGuard: new WorkspacePathGuard(),
+      approvalManager: new InteractiveApprovalManager(),
+    })
 
-    const systemMessages: {role: 'system'; content: string}[] = []
+    const systemMessages: AgentMessage[] = []
 
     if (flags.system) {
       systemMessages.push({role: 'system', content: flags.system})
@@ -133,13 +146,6 @@ export default class Run extends Command {
           path: flags['read-file'],
         })
 
-        const router = createDefaultToolRouter()
-        const executor = new SafeExecutor({
-          toolRouter: router,
-          pathGuard: new WorkspacePathGuard(),
-          approvalManager: new InteractiveApprovalManager(),
-        })
-
         const result = await executor.execute(
           {
             name: 'read_file',
@@ -167,17 +173,42 @@ export default class Run extends Command {
         })
       }
 
-      const messages = [...systemMessages, {role: 'user' as const, content: args.task}]
-      const response = await provider.chat({messages})
-      logger.info('provider.chat.done', 'provider response received', {
-        model: response.model,
+      const messages: AgentMessage[] = [...systemMessages, {role: 'user', content: args.task}]
+      const agent = new AgentOrchestrator({
+        provider,
+        toolExecutor: executor,
+        limits: {
+          timeoutMs: settings.timeoutMs,
+        },
+        onEvent: event => {
+          logAgentEvent(logger, event, {sessionId})
+        },
+      })
+      const agentResult = await agent.run({
+        messages,
+        toolContext: {
+          workspaceRoot,
+        },
+      })
+      const responseModel = getAgentResponseModel(agentResult.finalMessage, settings.model)
+      logger.info('agent.run.done', 'agent run completed', {
+        model: responseModel,
+        stoppedReason: agentResult.stoppedReason,
+        stepCount: agentResult.steps.length,
+        toolResultCount: agentResult.toolResults.length,
+      })
+      await persistAgentToolResults({
+        sessionStore,
+        sessionId,
+        result: agentResult,
       })
 
       await sessionStore.appendMessage(sessionId, {
         role: 'assistant',
-        content: response.content,
+        content: agentResult.finalMessage.content,
         metadata: {
-          model: response.model,
+          model: responseModel,
+          agent: summarizeAgentResult(agentResult),
           ...(retrievalSummary !== undefined ? {retrieval: retrievalSummary} : {}),
         },
       })
@@ -189,15 +220,15 @@ export default class Run extends Command {
       if (flags.output === 'rich') {
         if (!process.stdout.isTTY || !process.stdin.isTTY) {
           logger.warn('output.rich.unavailable', 'rich output requires TTY; falling back to plain')
-          this.log(response.content)
+          this.log(formatPlainRunOutput(agentResult.finalMessage.content, sessionId))
           return
         }
 
         const app = render(
           React.createElement(RunResultView, {
             task: args.task,
-            model: response.model,
-            response: response.content,
+            model: responseModel,
+            response: agentResult.finalMessage.content,
             sessionId,
             retrieval: retrievalSummary,
           }),
@@ -206,7 +237,7 @@ export default class Run extends Command {
         return
       }
 
-      this.log(formatPlainRunOutput(response.content, sessionId))
+      this.log(formatPlainRunOutput(agentResult.finalMessage.content, sessionId))
     } catch (error) {
       if (sessionId) {
         try {
@@ -249,4 +280,53 @@ function formatPlainRunOutput(response: string, sessionId: string | undefined): 
     `Session: ${sessionId}`,
     `Resume: daycli session resume ${sessionId}`,
   ].join('\n')
+}
+
+function getAgentResponseModel(message: AgentMessage, fallback: string): string {
+  const model = message.metadata?.model
+  return typeof model === 'string' ? model : fallback
+}
+
+function logAgentEvent(
+  logger: ReturnType<typeof createLogger>,
+  event: AgentEvent,
+  context: Record<string, unknown>,
+): void {
+  logger.info(`agent.${event.kind}`, `agent event: ${event.kind}`, {
+    ...context,
+    ...summarizeAgentEvent(event),
+  })
+}
+
+function summarizeAgentEvent(event: AgentEvent): Record<string, unknown> {
+  if (event.kind === 'stopped') {
+    return {
+      stoppedReason: event.stoppedReason,
+    }
+  }
+
+  const step = event.step
+  if (!step) {
+    return {}
+  }
+
+  if (step.kind === 'tool_call') {
+    return {
+      stepIndex: step.index,
+      toolCallId: step.toolCall.id,
+      toolName: step.toolCall.name,
+    }
+  }
+
+  if (step.kind === 'tool_result') {
+    return {
+      stepIndex: step.index,
+      toolCallId: step.toolCall.id,
+      toolName: step.result.toolName,
+    }
+  }
+
+  return {
+    stepIndex: step.index,
+  }
 }
