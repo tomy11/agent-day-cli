@@ -19,6 +19,7 @@ import {toAppError} from '../core/errors'
 import {buildCodeContext} from '../core/retrieval'
 import {SessionStore} from '../core/storage'
 import {RunResultView} from '../ui'
+import {resolveBatchMode} from '../core/batch'
 
 export default class Run extends Command {
   static override description = 'Run a single task prompt'
@@ -49,6 +50,10 @@ export default class Run extends Command {
       options: ['plain', 'rich'],
       default: 'plain',
     }),
+    batch: Flags.boolean({
+      description: 'Run non-interactively for scripts and CI; high-risk tools are denied unless a future policy allows them',
+      default: false,
+    }),
     'read-file': Flags.string({
       description: 'Read a workspace file and inject its content as extra context',
     }),
@@ -59,6 +64,10 @@ export default class Run extends Command {
     const workspaceRoot = process.cwd()
     const logger = createLogger({command: 'run'})
     logger.info('command.start', 'run command started')
+    const batchMode = resolveBatchMode({
+      batch: flags.batch,
+      output: flags.output as 'plain' | 'rich',
+    })
 
     const config = await loadDaycliConfig(workspaceRoot)
     const settings = resolveRunSettings(config, {
@@ -80,7 +89,9 @@ export default class Run extends Command {
     const executor = new SafeExecutor({
       toolRouter: router,
       pathGuard: new WorkspacePathGuard(),
-      approvalManager: new InteractiveApprovalManager(),
+      ...(batchMode.approvalMode === 'interactive'
+        ? {approvalManager: new InteractiveApprovalManager()}
+        : {}),
     })
 
     const systemMessages: AgentMessage[] = [
@@ -104,7 +115,10 @@ export default class Run extends Command {
         model: settings.model,
         metadata: {
           command: 'run',
-          output: flags.output,
+          output: batchMode.output,
+          batch: batchMode.enabled,
+          nonInteractive: batchMode.nonInteractive,
+          approvalMode: batchMode.approvalMode,
         },
       })
       sessionId = session.id
@@ -222,7 +236,7 @@ export default class Run extends Command {
         sessionId,
       })
 
-      if (flags.output === 'rich') {
+      if (batchMode.useRichOutput) {
         if (!process.stdout.isTTY || !process.stdin.isTTY) {
           logger.warn('output.rich.unavailable', 'rich output requires TTY; falling back to plain')
           this.log(formatPlainRunOutput(agentResult.finalMessage.content, sessionId))

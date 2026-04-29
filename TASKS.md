@@ -62,9 +62,9 @@
 - [x] M9 (Safe write/edit/run-command tools): persist write/edit/run-command tool results and metadata in sessions
 - [x] M9 (Safe write/edit/run-command tools): add unit and E2E tests for allowed, rejected, blocked, timeout, and failure paths
 - [x] M9 (Safe write/edit/run-command tools): update `ARCHITECTURE.md` and usage docs for safe mutation and command execution
-- [ ] M10 (Batch mode + policy file + CI-friendly output): define batch mode CLI contract and non-interactive behavior
-- [ ] M10 (Batch mode + policy file + CI-friendly output): design policy file schema for approvals, allowed paths, commands, limits, and output mode
-- [ ] M10 (Batch mode + policy file + CI-friendly output): implement policy loader and validation with clear error codes
+- [x] M10 (Batch mode + policy file + CI-friendly output): define batch mode CLI contract and non-interactive behavior
+- [x] M10 (Batch mode + policy file + CI-friendly output): design policy file schema for approvals, allowed paths, commands, limits, and output mode
+- [x] M10 (Batch mode + policy file + CI-friendly output): implement policy loader and validation with clear error codes
 - [ ] M10 (Batch mode + policy file + CI-friendly output): integrate policy decisions into approval and safe executor flow
 - [ ] M10 (Batch mode + policy file + CI-friendly output): add CI-friendly output modes such as plain, JSON, and exit codes
 - [ ] M10 (Batch mode + policy file + CI-friendly output): add batch execution tests for success, policy denial, tool failure, and deterministic output

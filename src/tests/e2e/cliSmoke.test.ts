@@ -604,6 +604,72 @@ test('run command feeds edit_file conflict back as recoverable failure', async t
   assert.match(requests[1]?.messages?.at(-1)?.content ?? '', /"code":"TOOL_EXECUTION_FAILED"/)
 })
 
+test('run command batch mode denies high-risk tools without prompting', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-run-batch-deny-'))
+  const requests: MockChatRequest[] = []
+  const server = createToolLoopServer({
+    requests,
+    firstContent: JSON.stringify({
+      content: 'Writing in batch mode',
+      toolCalls: [
+        {
+          id: 'call-1',
+          name: 'write_file',
+          input: {
+            path: 'batch.txt',
+            content: 'should not write\n',
+          },
+        },
+      ],
+    }),
+    finalContent: 'Batch mode denied the write because approval is unavailable.',
+  })
+
+  await listen(server)
+
+  t.after(async () => {
+    await close(server)
+    await rm(workspace, {recursive: true, force: true})
+  })
+
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+
+  const runResult = await runCliAsync(
+    [...createMockRunArgs('Try a batch write', address.port), '--batch'],
+    workspace,
+  )
+
+  assert.equal(runResult.status, 0)
+  assert.match(runResult.stdout, /Batch mode denied the write/)
+  assert.doesNotMatch(runResult.stdout, /Approve execution/)
+
+  await assert.rejects(
+    () => readFile(path.join(workspace, 'batch.txt'), 'utf8'),
+    (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT',
+  )
+
+  const toolMessage = await readOnlyToolMessage(workspace, 'write_file')
+  assert.ok(toolMessage)
+  assert.deepEqual(toolMessage.metadata?.toolResult, {
+    ok: false,
+    error: {
+      code: 'TOOL_APPROVAL_REQUIRED',
+      message: 'Approval manager is required for high-risk tool: write_file',
+      recoverable: true,
+      meta: {
+        toolName: 'write_file',
+      },
+    },
+  })
+
+  const session = await readOnlySession(workspace)
+  assert.equal(session.metadata?.batch, true)
+  assert.equal(session.metadata?.nonInteractive, true)
+  assert.equal(session.metadata?.approvalMode, 'deny_high_risk_without_policy')
+  assert.equal(requests.length, 2)
+})
+
 function listen(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {
     server.once('error', reject)
@@ -662,6 +728,17 @@ async function readOnlyToolMessage(workspace: string, toolName: string): Promise
   }
 
   return session.messages?.find(message => message.role === 'tool' && message.toolName === toolName)
+}
+
+async function readOnlySession(workspace: string): Promise<{
+  metadata?: Record<string, unknown>
+}> {
+  const sessionDir = path.join(workspace, '.daycli', 'sessions')
+  const sessionFiles = (await readdir(sessionDir)).filter(file => file.endsWith('.json'))
+  assert.equal(sessionFiles.length, 1)
+
+  const sessionRaw = await readFile(path.join(sessionDir, sessionFiles[0] ?? ''), 'utf8')
+  return JSON.parse(sessionRaw) as {metadata?: Record<string, unknown>}
 }
 
 function escapeRegExp(value: string): string {

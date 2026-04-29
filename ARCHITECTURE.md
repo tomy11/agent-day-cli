@@ -162,9 +162,37 @@ Tool results are persisted as session messages with role `tool`. Mutation and co
 
 This keeps session history useful for debugging without storing unnecessarily large command output in metadata.
 
+## Batch Mode Contract
+`daycli run "<task>" --batch` is the M10 entrypoint for non-interactive execution.
+
+- Scope: batch mode applies only to `run`, not `chat`.
+- UI: batch mode never renders Ink/rich UI and currently supports plain output only.
+- Approval: batch mode never opens an approval prompt. Until policy files are available, high-risk tools fail with `TOOL_APPROVAL_REQUIRED` and are fed back to the agent loop as recoverable tool errors.
+- Safety: workspace path guard, command policy, and tool risk levels still run before execution.
+- Sessions: batch runs create normal `run` sessions with metadata fields `batch`, `nonInteractive`, and `approvalMode`.
+
+Later M10 tasks will add policy files and CI-friendly output modes on top of this contract.
+
+### Policy File Schema
+The batch policy file contract lives in `src/core/batch/policyFile.ts`. Default filename: `daycli.policy.json`; schema version: `1`.
+
+Policy sections:
+
+- `approvals`: default decision, risk-level decisions, and per-tool overrides using `allow` or `deny`.
+- `paths`: workspace-relative allow/deny patterns for `read`, `write`, and `execute` access.
+- `commands`: command name allow/deny lists. Deny rules take precedence over allow rules.
+- `limits`: `maxSteps`, `maxToolCalls`, full-run timeout, per-command timeout, and command output byte budget.
+- `output`: batch output mode (`plain` or `json`) and metadata/session id inclusion flags.
+
+The default policy is intentionally conservative: low-risk reads are allowed, high-risk tools are denied, writes and command execution have empty allow lists, protected paths remain denied, and plain output is the default.
+
+The loader resolves `daycli.policy.json` inside the workspace by default, validates the schema, and normalizes omitted sections with the conservative defaults. Explicit missing files fail with `POLICY_NOT_FOUND`; invalid JSON, unknown keys, unsupported versions, wrong value types, and out-of-workspace policy paths fail with `POLICY_INVALID`; file-system read failures fail with `POLICY_IO_ERROR`.
+
 ## Core Modules
 - `src/cli/*` : command entrypoints (oclif)
 - `src/providers/OllamaProvider.ts` : เชื่อม Ollama API
+- `src/core/batch/batchMode.ts` : batch CLI contract and non-interactive behavior
+- `src/core/batch/policyFile.ts` : batch policy schema, loader, and validation for approvals, paths, commands, limits, and output
 - `src/tools/toolRouter.ts` : map tool name -> handler
 - `src/execution/safeExecutor.ts` : บังคับ policy ก่อน execute
 - `src/core/tools/contracts.ts` : shared tool input contracts and risk metadata
