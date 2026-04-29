@@ -1,9 +1,11 @@
 import type {ChatMessage, ChatRole, LlmProvider} from '../providers'
 import type {SafeExecutor} from '../execution'
 import type {ToolExecutionResult} from '../tools'
+import {AppError, toAppError} from '../errors'
 import {
   DEFAULT_AGENT_LIMITS,
   type AgentEvent,
+  type AgentInvalidToolCall,
   type AgentLimits,
   type AgentMessage,
   type AgentRequest,
@@ -90,6 +92,7 @@ export class AgentOrchestrator {
         return createStoppedResult({
           finalMessage: createEmptyAssistantMessage('maxSteps reached before model response'),
           steps,
+          toolResults,
           stoppedReason: 'step_limit',
         })
       }
@@ -98,12 +101,19 @@ export class AgentOrchestrator {
         messages: toProviderMessages(messages),
       })
       const parsed = parseToolCallMessage(response.content)
+      const toolCalls = [
+        ...(parsed.invalidToolCalls?.map(createMalformedToolCall) ?? []),
+        ...parsed.toolCalls,
+      ]
       const modelMessage: AgentMessage = {
         role: 'assistant',
         content: parsed.content,
         metadata: {
           model: response.model,
           ...(parsed.toolCalls.length > 0 ? {toolCalls: parsed.toolCalls} : {}),
+          ...(parsed.invalidToolCalls && parsed.invalidToolCalls.length > 0
+            ? {invalidToolCalls: parsed.invalidToolCalls}
+            : {}),
         },
       }
       messages.push(modelMessage)
@@ -113,12 +123,12 @@ export class AgentOrchestrator {
         index: steps.length,
         createdAt: this.timestamp(),
         message: modelMessage,
-        toolCalls: parsed.toolCalls,
+        toolCalls,
       }
       steps.push(modelStep)
       this.emit({kind: 'model_response', step: modelStep})
 
-      if (parsed.toolCalls.length > 0) {
+      if (toolCalls.length > 0) {
         if (!this.toolExecutor || !request.toolContext) {
           this.emit({kind: 'stopped', stoppedReason: 'tool_call_limit'})
           return createStoppedResult({
@@ -129,7 +139,7 @@ export class AgentOrchestrator {
           })
         }
 
-        for (const toolCall of parsed.toolCalls) {
+        for (const toolCall of toolCalls) {
           if (toolCallCount >= limits.maxToolCalls) {
             this.emit({kind: 'stopped', stoppedReason: 'tool_call_limit'})
             return createStoppedResult({
@@ -160,20 +170,10 @@ export class AgentOrchestrator {
           this.emit({kind: 'tool_call', step: toolCallStep})
           toolCallCount += 1
 
-          const executionResult = await this.toolExecutor.execute(
-            {
-              name: toolCall.name,
-              input: toolCall.input,
-            },
-            request.toolContext,
-          )
-          toolResults.push(executionResult)
-          const result: AgentToolResult = {
-            id: toolCall.id,
-            toolName: executionResult.toolName,
-            output: executionResult.output,
-            content: stringifyToolOutput(executionResult.output),
-          }
+          const invalidToolCall = parsed.invalidToolCalls?.find(invalid => invalid.id === toolCall.id)
+          const result = invalidToolCall
+            ? createToolErrorResult(toolCall, invalidToolCall.error)
+            : await this.executeToolCall(toolCall, request.toolContext, toolResults)
 
           if (!canAppendStep(steps, limits)) {
             this.emit({kind: 'stopped', stoppedReason: 'step_limit'})
@@ -198,7 +198,7 @@ export class AgentOrchestrator {
             role: 'tool',
             content: result.content,
             toolCallId: toolCall.id,
-            toolName: executionResult.toolName,
+            toolName: result.toolName,
           })
         }
 
@@ -259,6 +259,37 @@ export class AgentOrchestrator {
 
   private timestamp(): string {
     return this.now().toISOString()
+  }
+
+  private async executeToolCall(
+    toolCall: AgentToolCall,
+    toolContext: NonNullable<AgentRequest['toolContext']>,
+    toolResults: ToolExecutionResult[],
+  ): Promise<AgentToolResult> {
+    try {
+      const executionResult = await this.toolExecutor!.execute(
+        {
+          name: toolCall.name,
+          input: toolCall.input,
+        },
+        toolContext,
+      )
+      toolResults.push(executionResult)
+
+      return {
+        id: toolCall.id,
+        toolName: executionResult.toolName,
+        output: executionResult.output,
+        content: stringifyToolOutput(executionResult.output),
+      }
+    } catch (error) {
+      const appError = toAppError(error)
+      return createToolErrorResult(toolCall, {
+        code: appError.code,
+        message: appError.message,
+        meta: appError.meta,
+      })
+    }
   }
 }
 
@@ -364,7 +395,13 @@ export function parseToolCallMessage(content: string): ParsedToolCallMessage {
   try {
     const parsed = JSON.parse(trimmed) as unknown
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return {content, toolCalls: []}
+      return {
+        content: '',
+        toolCalls: [],
+        invalidToolCalls: [
+          createInvalidToolCall(0, parsed, 'Tool-call response must be a JSON object.'),
+        ],
+      }
     }
 
     const candidate = parsed as {content?: unknown; toolCalls?: unknown}
@@ -372,31 +409,83 @@ export function parseToolCallMessage(content: string): ParsedToolCallMessage {
       return {content, toolCalls: []}
     }
 
-    const toolCalls = candidate.toolCalls.flatMap((item, index): AgentToolCall[] => {
+    const toolCalls: AgentToolCall[] = []
+    const invalidToolCalls: AgentInvalidToolCall[] = []
+
+    candidate.toolCalls.forEach((item, index) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) {
-        return []
+        invalidToolCalls.push(createInvalidToolCall(index, item, 'Tool call must be a JSON object.'))
+        return
       }
 
       const call = item as {id?: unknown; name?: unknown; input?: unknown}
       if (typeof call.name !== 'string' || call.name.length === 0) {
-        return []
+        invalidToolCalls.push(createInvalidToolCall(index, item, 'Tool call name must be a non-empty string.'))
+        return
       }
 
-      return [
-        {
-          id: typeof call.id === 'string' && call.id.length > 0 ? call.id : `call-${index + 1}`,
-          name: call.name,
-          ...(call.input !== undefined ? {input: call.input} : {}),
-        },
-      ]
+      toolCalls.push({
+        id: typeof call.id === 'string' && call.id.length > 0 ? call.id : `call-${index + 1}`,
+        name: call.name,
+        ...(call.input !== undefined ? {input: call.input} : {}),
+      })
     })
 
     return {
       content: typeof candidate.content === 'string' ? candidate.content : '',
       toolCalls,
+      ...(invalidToolCalls.length > 0 ? {invalidToolCalls} : {}),
     }
-  } catch {
-    return {content, toolCalls: []}
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    return {
+      content: '',
+      toolCalls: [],
+      invalidToolCalls: [
+        createInvalidToolCall(0, content, `Tool-call response must be valid JSON: ${detail}`),
+      ],
+    }
+  }
+}
+
+function createInvalidToolCall(index: number, raw: unknown, message: string): AgentInvalidToolCall {
+  return {
+    id: `invalid-call-${index + 1}`,
+    raw,
+    error: {
+      code: 'TOOL_CALL_MALFORMED',
+      message,
+    },
+  }
+}
+
+function createMalformedToolCall(invalid: AgentInvalidToolCall): AgentToolCall {
+  return {
+    id: invalid.id,
+    name: '__malformed_tool_call__',
+    input: invalid.raw,
+  }
+}
+
+function createToolErrorResult(
+  toolCall: AgentToolCall,
+  error: {code: AppError['code'] | 'TOOL_CALL_MALFORMED'; message: string; meta?: Record<string, unknown>},
+): AgentToolResult {
+  const output = {
+    ok: false,
+    error: {
+      code: error.code,
+      message: error.message,
+      recoverable: true,
+      ...(error.meta ? {meta: error.meta} : {}),
+    },
+  }
+
+  return {
+    id: toolCall.id,
+    toolName: toolCall.name,
+    output,
+    content: stringifyToolOutput(output),
   }
 }
 

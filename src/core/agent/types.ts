@@ -17,6 +17,15 @@ export interface AgentToolCall extends ToolCall {
   input?: unknown
 }
 
+export interface AgentInvalidToolCall {
+  id: string
+  raw: unknown
+  error: {
+    code: 'TOOL_CALL_MALFORMED'
+    message: string
+  }
+}
+
 export interface AgentToolResult {
   id: string
   toolName: string
@@ -96,6 +105,7 @@ export interface AgentResult {
 export interface ParsedToolCallMessage {
   content: string
   toolCalls: AgentToolCall[]
+  invalidToolCalls?: AgentInvalidToolCall[]
 }
 
 export const DEFAULT_AGENT_LIMITS: AgentLimits = {

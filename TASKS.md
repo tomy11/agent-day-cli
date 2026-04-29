@@ -49,9 +49,10 @@
 - [x] M8 (Agent loop + real tool calling): integrate agent loop into `daycli run`
 - [x] M8 (Agent loop + real tool calling): integrate agent loop into `daycli chat`
 - [x] M8 (Agent loop + real tool calling): persist agent steps and tool results into sessions
-- [ ] M8 (Agent loop + real tool calling): handle malformed/unknown tool calls with recoverable errors
-- [ ] M8 (Agent loop + real tool calling): add tests for successful tool use, rejected approval, guard failure, and loop limit
-- [ ] M8 (Agent loop + real tool calling): update `ARCHITECTURE.md` with agent loop sequence diagram
+- [x] M8 (Agent loop + real tool calling): handle malformed/unknown tool calls with recoverable errors
+- [x] M8 (Agent loop + real tool calling): add tests for successful tool use
+- [x] M8 (Agent loop + real tool calling): add tests for rejected approval, guard failure, and loop limit
+- [x] M8 (Agent loop + real tool calling): update `ARCHITECTURE.md` with agent loop sequence diagram
 
 ## In Progress
 - [ ] (none)

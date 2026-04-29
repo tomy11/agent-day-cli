@@ -1,5 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import path from 'node:path'
+import {tmpdir} from 'node:os'
+import {mkdtemp, rm, writeFile} from 'node:fs/promises'
 import {
   type AgentEvent,
   AgentOrchestrator,
@@ -7,8 +10,18 @@ import {
   resolveAgentLimits,
   toProviderMessages,
 } from '../../core/agent'
+import {type ApprovalManager, SafeExecutor} from '../../core/execution'
 import type {ChatRequest, ChatResponse, LlmProvider} from '../../core/providers'
-import type {ToolCall, ToolContext, ToolExecutionResult} from '../../core/tools'
+import {
+  createDefaultToolRouter,
+  ToolRouter,
+  type ToolCall,
+  type ToolContext,
+  type ToolDefinition,
+  type ToolExecutionResult,
+} from '../../core/tools'
+import {WorkspacePathGuard} from '../../core/security'
+import {AppError} from '../../core/errors'
 
 class FakeProvider implements LlmProvider {
   public requests: ChatRequest[] = []
@@ -36,8 +49,14 @@ class FakeProvider implements LlmProvider {
 class FakeToolExecutor {
   public calls: Array<{call: ToolCall; context: ToolContext}> = []
 
+  public constructor(private readonly error?: Error) {}
+
   public async execute(call: ToolCall, context: ToolContext): Promise<ToolExecutionResult> {
     this.calls.push({call, context})
+    if (this.error) {
+      throw this.error
+    }
+
     return {
       toolName: call.name,
       output: {
@@ -45,6 +64,23 @@ class FakeToolExecutor {
         input: call.input,
       },
     }
+  }
+}
+
+function createHighRiskToolRouter(): ToolRouter {
+  const router = new ToolRouter()
+  router.register(createHighRiskTool())
+  return router
+}
+
+function createHighRiskTool(): ToolDefinition {
+  return {
+    name: 'danger',
+    description: 'high risk test tool',
+    riskLevel: 'high',
+    async execute() {
+      return 'danger executed'
+    },
   }
 }
 
@@ -228,6 +264,294 @@ test('AgentOrchestrator routes requested tool calls through executor and feeds r
   assert.equal(events.at(-1)?.stoppedReason, 'final_answer')
 })
 
+test('AgentOrchestrator successfully executes read_file through the real safe tool stack', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-agent-tool-success-'))
+  await writeFile(path.join(workspace, 'README.md'), 'successful real tool use\n', 'utf8')
+
+  t.after(async () => {
+    await rm(workspace, {recursive: true, force: true})
+  })
+
+  const provider = new FakeProvider([
+    {
+      content: JSON.stringify({
+        content: 'Reading README.md',
+        toolCalls: [
+          {
+            id: 'call-1',
+            name: 'read_file',
+            input: {
+              path: 'README.md',
+            },
+          },
+        ],
+      }),
+      model: 'fake-model',
+    },
+    {
+      content: 'The file says successful real tool use.',
+      model: 'fake-model',
+    },
+  ])
+  const toolExecutor = new SafeExecutor({
+    toolRouter: createDefaultToolRouter(),
+    pathGuard: new WorkspacePathGuard(),
+  })
+  const orchestrator = new AgentOrchestrator({
+    provider,
+    toolExecutor,
+  })
+
+  const result = await orchestrator.run({
+    messages: [{role: 'user', content: 'Read README.md'}],
+    toolContext: {
+      workspaceRoot: workspace,
+    },
+  })
+
+  assert.equal(result.stoppedReason, 'final_answer')
+  assert.equal(result.finalMessage.content, 'The file says successful real tool use.')
+  assert.equal(result.toolResults.length, 1)
+  assert.equal(result.toolResults[0]?.toolName, 'read_file')
+  assert.deepEqual(
+    result.steps.map(step => step.kind),
+    ['model_response', 'tool_call', 'tool_result', 'model_response', 'final_answer'],
+  )
+
+  const toolMessage = provider.requests[1]?.messages.at(-1)
+  assert.equal(toolMessage?.role, 'user')
+  assert.match(toolMessage?.content ?? '', /Tool result from read_file \(call-1\):/)
+  assert.match(toolMessage?.content ?? '', /successful real tool use/)
+  assert.match(toolMessage?.content ?? '', /"truncated":false/)
+})
+
+test('AgentOrchestrator feeds malformed tool calls back as recoverable tool errors', async () => {
+  const provider = new FakeProvider([
+    {
+      content: JSON.stringify({
+        content: 'I will call a tool.',
+        toolCalls: [
+          {
+            id: 'bad-call',
+            input: {
+              path: 'README.md',
+            },
+          },
+        ],
+      }),
+      model: 'fake-model',
+    },
+    {
+      content: 'I could not call the tool because the request was malformed.',
+      model: 'fake-model',
+    },
+  ])
+  const toolExecutor = new FakeToolExecutor()
+  const orchestrator = new AgentOrchestrator({
+    provider,
+    toolExecutor,
+  })
+
+  const result = await orchestrator.run({
+    messages: [{role: 'user', content: 'Read README.md'}],
+    toolContext: {
+      workspaceRoot: '/tmp/workspace',
+    },
+  })
+
+  assert.equal(result.stoppedReason, 'final_answer')
+  assert.equal(toolExecutor.calls.length, 0)
+  assert.deepEqual(
+    result.steps.map(step => step.kind),
+    ['model_response', 'tool_call', 'tool_result', 'model_response', 'final_answer'],
+  )
+  assert.equal(result.toolResults.length, 0)
+  assert.equal(provider.requests[1]?.messages.at(-1)?.role, 'user')
+  assert.match(
+    provider.requests[1]?.messages.at(-1)?.content ?? '',
+    /"code":"TOOL_CALL_MALFORMED"/,
+  )
+})
+
+test('AgentOrchestrator feeds unknown tool errors back to provider without throwing', async () => {
+  const provider = new FakeProvider([
+    {
+      content: JSON.stringify({
+        toolCalls: [
+          {
+            id: 'call-1',
+            name: 'missing_tool',
+            input: {
+              path: 'README.md',
+            },
+          },
+        ],
+      }),
+      model: 'fake-model',
+    },
+    {
+      content: 'That tool is not available.',
+      model: 'fake-model',
+    },
+  ])
+  const toolExecutor = new FakeToolExecutor(
+    new AppError('TOOL_UNKNOWN', 'Unknown tool: missing_tool', {
+      meta: {
+        toolName: 'missing_tool',
+      },
+    }),
+  )
+  const orchestrator = new AgentOrchestrator({
+    provider,
+    toolExecutor,
+  })
+
+  const result = await orchestrator.run({
+    messages: [{role: 'user', content: 'Use an unavailable tool'}],
+    toolContext: {
+      workspaceRoot: '/tmp/workspace',
+    },
+  })
+
+  assert.equal(result.stoppedReason, 'final_answer')
+  assert.equal(result.finalMessage.content, 'That tool is not available.')
+  assert.equal(toolExecutor.calls.length, 1)
+  assert.equal(result.toolResults.length, 0)
+  assert.match(
+    provider.requests[1]?.messages.at(-1)?.content ?? '',
+    /"code":"TOOL_UNKNOWN"/,
+  )
+  assert.match(
+    provider.requests[1]?.messages.at(-1)?.content ?? '',
+    /"recoverable":true/,
+  )
+})
+
+test('AgentOrchestrator feeds rejected approval back as a recoverable tool error', async () => {
+  const provider = new FakeProvider([
+    {
+      content: JSON.stringify({
+        toolCalls: [
+          {
+            id: 'call-1',
+            name: 'danger',
+            input: {
+              command: 'write',
+            },
+          },
+        ],
+      }),
+      model: 'fake-model',
+    },
+    {
+      content: 'I will continue without running the dangerous tool.',
+      model: 'fake-model',
+    },
+  ])
+  const approvals: Array<{toolName: string; payload: unknown; workspaceRoot: string}> = []
+  const approvalManager: ApprovalManager = {
+    async requestToolApproval(input) {
+      approvals.push({
+        toolName: input.tool.name,
+        payload: input.payload,
+        workspaceRoot: input.context.workspaceRoot,
+      })
+      return false
+    },
+  }
+  const toolExecutor = new SafeExecutor({
+    toolRouter: createHighRiskToolRouter(),
+    approvalManager,
+  })
+  const orchestrator = new AgentOrchestrator({
+    provider,
+    toolExecutor,
+  })
+
+  const result = await orchestrator.run({
+    messages: [{role: 'user', content: 'Run danger'}],
+    toolContext: {
+      workspaceRoot: '/tmp/workspace',
+    },
+  })
+
+  assert.equal(result.stoppedReason, 'final_answer')
+  assert.deepEqual(approvals, [
+    {
+      toolName: 'danger',
+      payload: {
+        command: 'write',
+      },
+      workspaceRoot: '/tmp/workspace',
+    },
+  ])
+  assert.equal(result.toolResults.length, 0)
+  assert.match(
+    provider.requests[1]?.messages.at(-1)?.content ?? '',
+    /"code":"TOOL_APPROVAL_REJECTED"/,
+  )
+  assert.match(
+    provider.requests[1]?.messages.at(-1)?.content ?? '',
+    /"recoverable":true/,
+  )
+})
+
+test('AgentOrchestrator feeds path guard failures back as recoverable tool errors', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-agent-guard-failure-'))
+
+  t.after(async () => {
+    await rm(workspace, {recursive: true, force: true})
+  })
+
+  const provider = new FakeProvider([
+    {
+      content: JSON.stringify({
+        toolCalls: [
+          {
+            id: 'call-1',
+            name: 'read_file',
+            input: {
+              path: '../outside.txt',
+            },
+          },
+        ],
+      }),
+      model: 'fake-model',
+    },
+    {
+      content: 'That path is outside the workspace, so I will not read it.',
+      model: 'fake-model',
+    },
+  ])
+  const toolExecutor = new SafeExecutor({
+    toolRouter: createDefaultToolRouter(),
+    pathGuard: new WorkspacePathGuard(),
+  })
+  const orchestrator = new AgentOrchestrator({
+    provider,
+    toolExecutor,
+  })
+
+  const result = await orchestrator.run({
+    messages: [{role: 'user', content: 'Read outside the workspace'}],
+    toolContext: {
+      workspaceRoot: workspace,
+    },
+  })
+
+  assert.equal(result.stoppedReason, 'final_answer')
+  assert.equal(result.finalMessage.content, 'That path is outside the workspace, so I will not read it.')
+  assert.equal(result.toolResults.length, 0)
+  assert.match(
+    provider.requests[1]?.messages.at(-1)?.content ?? '',
+    /"code":"TOOL_PATH_BLOCKED"/,
+  )
+  assert.match(
+    provider.requests[1]?.messages.at(-1)?.content ?? '',
+    /"candidate":"\.\.\/outside\.txt"/,
+  )
+})
+
 test('AgentOrchestrator stops when maxToolCalls is exceeded before execution', async () => {
   const provider = new FakeProvider({
     content: JSON.stringify({
@@ -261,6 +585,47 @@ test('AgentOrchestrator stops when maxToolCalls is exceeded before execution', a
   assert.deepEqual(
     result.steps.map(step => step.kind),
     ['model_response'],
+  )
+})
+
+test('AgentOrchestrator stops the loop when maxSteps is reached after a tool result', async () => {
+  const provider = new FakeProvider({
+    content: JSON.stringify({
+      toolCalls: [
+        {
+          id: 'call-1',
+          name: 'read_file',
+          input: {
+            path: 'README.md',
+          },
+        },
+      ],
+    }),
+    model: 'fake-model',
+  })
+  const toolExecutor = new FakeToolExecutor()
+  const orchestrator = new AgentOrchestrator({provider, toolExecutor})
+
+  const result = await orchestrator.run({
+    messages: [{role: 'user', content: 'Summarize README.md'}],
+    toolContext: {
+      workspaceRoot: '/tmp/workspace',
+    },
+    limits: {
+      maxSteps: 3,
+    },
+  })
+
+  assert.equal(result.stoppedReason, 'step_limit')
+  assert.equal(provider.requests.length, 1)
+  assert.equal(result.finalMessage.content, '')
+  assert.deepEqual(result.finalMessage.metadata, {
+    reason: 'maxSteps reached before model response',
+  })
+  assert.equal(result.toolResults.length, 1)
+  assert.deepEqual(
+    result.steps.map(step => step.kind),
+    ['model_response', 'tool_call', 'tool_result'],
   )
 })
 

@@ -41,6 +41,79 @@ Command Handler <-> SessionStore (.daycli/sessions/*.json)
 7. บันทึก session/message metadata ลง `.daycli/sessions`
 8. แสดงผลสุดท้ายให้ผู้ใช้ พร้อม log ที่ตรวจสอบย้อนหลังได้
 
+## Agent Loop Sequence
+`daycli run` และ `daycli chat` ใช้ `AgentOrchestrator` เพื่อเรียก provider ซ้ำจนได้ final answer หรือชน guard limit
+
+```text
+User
+  |
+  v
+CLI Command (run/chat)
+  |
+  v
+AgentOrchestrator
+  |
+  | 1. send messages
+  v
+LLM Provider (OllamaProvider)
+  |
+  | 2a. final answer without toolCalls
+  v
+AgentOrchestrator
+  |
+  | append final_answer step
+  v
+CLI Command -> SessionStore -> User
+
+Tool-call path:
+
+AgentOrchestrator
+  |
+  | 2b. parse JSON { content, toolCalls[] }
+  v
+SafeExecutor
+  |
+  | resolve tool
+  v
+ToolRouter
+  |
+  | enforce workspace and approval policy
+  v
+WorkspacePathGuard / ApprovalManager
+  |
+  | execute allowed tool
+  v
+Tool Implementation (read_file, etc.)
+  |
+  | tool result
+  v
+AgentOrchestrator
+  |
+  | append tool_call + tool_result steps
+  | convert tool result into provider-compatible user message
+  +-----------------------------> LLM Provider
+
+Recoverable tool-error path:
+
+Malformed tool call / unknown tool / blocked path / rejected approval
+  |
+  v
+AgentOrchestrator
+  |
+  | append tool_result with { ok: false, error: { code, message, recoverable: true } }
+  | feed error result back to provider
+  +-----------------------------> LLM Provider
+
+Stop conditions:
+
+- `final_answer`: provider returns normal assistant content with no tool calls
+- `step_limit`: max agent steps reached before another model/tool/final step can be appended
+- `tool_call_limit`: max tool calls reached, or tool executor/context is missing
+- `timeout`: total agent loop exceeds configured timeout
+```
+
+Each loop step emits an `AgentEvent` (`model_response`, `tool_call`, `tool_result`, `final_answer`, `stopped`) for UI rendering and structured logs. Completed runs persist assistant messages plus agent metadata, and tool result steps are persisted as session messages with role `tool`.
+
 ## Core Modules
 - `src/cli/*` : command entrypoints (oclif)
 - `src/providers/OllamaProvider.ts` : เชื่อม Ollama API
