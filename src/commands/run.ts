@@ -10,6 +10,7 @@ import {loadDaycliConfig, resolveRunSettings} from '../core/config'
 import {createLogger} from '../core/observability'
 import {toAppError} from '../core/errors'
 import {buildCodeContext} from '../core/retrieval'
+import {SessionStore} from '../core/storage'
 import {RunResultView} from '../ui'
 
 export default class Run extends Command {
@@ -60,6 +61,9 @@ export default class Run extends Command {
     })
     logger.debug('config.resolved', 'run settings resolved', {...settings})
 
+    const sessionStore = new SessionStore(workspaceRoot)
+    let sessionId: string | undefined
+
     const provider = new OllamaProvider({
       model: settings.model,
       baseUrl: settings.baseUrl,
@@ -75,6 +79,26 @@ export default class Run extends Command {
     let retrievalSummary: {chunkCount: number; truncated: boolean} | undefined
 
     try {
+      const session = await sessionStore.create({
+        kind: 'run',
+        title: createRunSessionTitle(args.task),
+        workspaceRoot,
+        model: settings.model,
+        metadata: {
+          command: 'run',
+          output: flags.output,
+        },
+      })
+      sessionId = session.id
+      logger.info('session.created', 'run session created', {
+        sessionId,
+      })
+
+      await sessionStore.appendMessage(sessionId, {
+        role: 'user',
+        content: args.task,
+      })
+
       try {
         const codeContext = await buildCodeContext({
           workspaceRoot,
@@ -149,6 +173,19 @@ export default class Run extends Command {
         model: response.model,
       })
 
+      await sessionStore.appendMessage(sessionId, {
+        role: 'assistant',
+        content: response.content,
+        metadata: {
+          model: response.model,
+          ...(retrievalSummary !== undefined ? {retrieval: retrievalSummary} : {}),
+        },
+      })
+      await sessionStore.updateStatus(sessionId, 'completed')
+      logger.info('session.completed', 'run session completed', {
+        sessionId,
+      })
+
       if (flags.output === 'rich') {
         if (!process.stdout.isTTY || !process.stdin.isTTY) {
           logger.warn('output.rich.unavailable', 'rich output requires TTY; falling back to plain')
@@ -161,6 +198,7 @@ export default class Run extends Command {
             task: args.task,
             model: response.model,
             response: response.content,
+            sessionId,
             retrieval: retrievalSummary,
           }),
         )
@@ -168,8 +206,19 @@ export default class Run extends Command {
         return
       }
 
-      this.log(response.content)
+      this.log(formatPlainRunOutput(response.content, sessionId))
     } catch (error) {
+      if (sessionId) {
+        try {
+          await sessionStore.updateStatus(sessionId, 'failed')
+        } catch (sessionError) {
+          logger.warn('session.status.failed', 'failed to mark run session as failed', {
+            sessionId,
+            error: sessionError instanceof Error ? sessionError.message : String(sessionError),
+          })
+        }
+      }
+
       const appError = toAppError(error)
       logger.error('command.error', appError.message, {
         code: appError.code,
@@ -178,4 +227,26 @@ export default class Run extends Command {
       this.error(`[${appError.code}] ${appError.message}`, {exit: 1})
     }
   }
+}
+
+function createRunSessionTitle(task: string): string {
+  const normalized = task.trim().replaceAll(/\s+/g, ' ')
+  if (normalized.length <= 80) {
+    return normalized || 'Untitled run'
+  }
+
+  return `${normalized.slice(0, 77)}...`
+}
+
+function formatPlainRunOutput(response: string, sessionId: string | undefined): string {
+  if (!sessionId) {
+    return response
+  }
+
+  return [
+    response,
+    '',
+    `Session: ${sessionId}`,
+    `Resume: daycli session resume ${sessionId}`,
+  ].join('\n')
 }

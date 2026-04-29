@@ -25,6 +25,8 @@ Tool Implementations (read_file, etc.)    |
   +-------------------- result ---------->+
 
 Command Handler <-> LLM Provider (OllamaProvider)
+
+Command Handler <-> SessionStore (.daycli/sessions/*.json)
 ```
 
 ## Flow
@@ -36,7 +38,8 @@ Command Handler <-> LLM Provider (OllamaProvider)
    - path guard: อนุญาตเฉพาะ path ใน workspace
    - approval manager: ขออนุมัติเมื่อเป็น action เสี่ยง
 6. เรียก tool implementation และส่งผลลัพธ์กลับ handler
-7. แสดงผลสุดท้ายให้ผู้ใช้ พร้อม log ที่ตรวจสอบย้อนหลังได้
+7. บันทึก session/message metadata ลง `.daycli/sessions`
+8. แสดงผลสุดท้ายให้ผู้ใช้ พร้อม log ที่ตรวจสอบย้อนหลังได้
 
 ## Core Modules
 - `src/cli/*` : command entrypoints (oclif)
@@ -46,11 +49,36 @@ Command Handler <-> LLM Provider (OllamaProvider)
 - `src/security/pathGuard.ts` : ตรวจ path traversal / out-of-scope
 - `src/security/approvalManager.ts` : interactive approval flow
 - `src/core/workspace/workspaceSummary.ts` : สร้าง workspace snapshot แบบ read-only สำหรับระบบ prompt/context
+- `src/core/storage/sessionStore.ts` : จัดเก็บ session แบบ JSON ต่อ workspace ใน `.daycli/sessions`
 
 ## UI Composition (Ink)
 - `src/ui/components/AppFrame.ts` : กรอบหลักของหน้าจอ chat/run
 - `src/ui/components/ChatApp.ts` : state machine ของ interactive session
 - `src/ui/components/WelcomeHero.ts` : branded welcome (ASCII logo + usage hints) แสดงตอนเริ่ม session
+
+## Session Lifecycle
+```text
+daycli run <task>
+  -> create run session
+  -> append user task
+  -> call provider
+  -> append assistant response
+  -> mark completed or failed
+
+daycli chat
+  -> create chat session
+  -> append each user/assistant turn
+
+daycli session list
+  -> read summaries from .daycli/sessions
+
+daycli session resume <id>
+  -> load session history
+  -> render ChatApp with initial messages
+  -> append new turns to the same session
+```
+
+Session files are workspace-local JSON records. Session ids are validated before file access, and invalid or corrupted session files return coded `SESSION_*` errors.
 
 ## Safety Principles
 - Default deny: ปฏิเสธการเข้าถึงที่ไม่ตรง policy

@@ -13,10 +13,17 @@ interface RunResultViewProps {
   task: string
   model: string
   response: string
+  sessionId?: string
   retrieval?: RetrievalSummary
 }
 
-export function RunResultView({task, model, response, retrieval}: RunResultViewProps): React.JSX.Element {
+export function RunResultView({
+  task,
+  model,
+  response,
+  sessionId,
+  retrieval,
+}: RunResultViewProps): React.JSX.Element {
   const {exit} = useApp()
 
   useEffect(() => {
@@ -29,7 +36,7 @@ export function RunResultView({task, model, response, retrieval}: RunResultViewP
     {
       title: 'daycli run',
       subtitle: `model=${model}`,
-      footer: 'output=rich',
+      footer: sessionId ? `resume: daycli session resume ${sessionId}` : 'output=rich',
     },
     React.createElement(
       Box,
@@ -43,6 +50,14 @@ export function RunResultView({task, model, response, retrieval}: RunResultViewP
       React.createElement(Text, {bold: true, color: DEFAULT_UI_THEME.brand}, 'Response'),
       React.createElement(Text, null, response),
     ),
+    sessionId
+      ? React.createElement(
+          Box,
+          {marginTop: 1, flexDirection: 'column'},
+          React.createElement(Text, {bold: true, color: DEFAULT_UI_THEME.muted}, 'Session'),
+          React.createElement(Text, {color: DEFAULT_UI_THEME.muted}, sessionId),
+        )
+      : null,
     retrieval
       ? React.createElement(
           Box,

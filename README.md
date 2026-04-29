@@ -24,7 +24,7 @@ Run locally:
 ## Quick Start
 
 ```bash
-# Interactive scaffold
+# Interactive chat
 ./bin/run.js chat
 
 # One-shot task
@@ -35,7 +35,7 @@ Run locally:
 
 ### `daycli chat`
 
-Start interactive chat session scaffold.
+Start an interactive chat session. Chat turns are persisted under `.daycli/sessions`.
 
 ```bash
 ./bin/run.js chat
@@ -43,7 +43,7 @@ Start interactive chat session scaffold.
 
 ### `daycli run "<task>"`
 
-Run a single task prompt via Ollama provider.
+Run a single task prompt via Ollama provider. Each run is saved as a resumable session.
 
 ```bash
 ./bin/run.js run "explain current architecture"
@@ -85,19 +85,32 @@ Examples:
 
 ### `daycli session list`
 
-List sessions scaffold.
+List recent sessions in the current workspace.
 
 ```bash
 ./bin/run.js session list
+./bin/run.js session list --limit 5
 ```
 
 ### `daycli session resume <id>`
 
-Resume a session by id scaffold.
+Resume a saved session by id. In an interactive terminal this opens chat with the saved history loaded. In non-interactive output it prints a session summary.
 
 ```bash
-./bin/run.js session resume abc123
+./bin/run.js session resume 20260429072136-7fb68c05-e6bc-44d3-8f7e-f62768291dcf
 ```
+
+## Sessions
+
+`daycli` stores session files in the current workspace:
+
+```txt
+.daycli/
+  sessions/
+    <session-id>.json
+```
+
+Session ids are shown after `daycli run` completes and in the interactive chat footer. Use `daycli session list` to find recent sessions and `daycli session resume <id>` to continue one.
 
 ## Configuration File
 

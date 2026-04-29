@@ -2,8 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import {tmpdir} from 'node:os'
-import {mkdtemp, readFile, rm} from 'node:fs/promises'
-import {spawnSync} from 'node:child_process'
+import {mkdtemp, readFile, readdir, rm} from 'node:fs/promises'
+import {spawn, spawnSync} from 'node:child_process'
+import {createServer, type Server} from 'node:http'
 
 interface CliResult {
   status: number | null
@@ -30,6 +31,31 @@ function runCli(args: string[], cwd: string): CliResult {
   }
 }
 
+function runCliAsync(args: string[], cwd: string): Promise<CliResult> {
+  const repoRoot = path.resolve(__dirname, '../../..')
+  const entrypoint = path.join(repoRoot, 'bin', 'run.js')
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [entrypoint, ...args], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    const stdout: Buffer[] = []
+    const stderr: Buffer[] = []
+
+    child.stdout.on('data', chunk => stdout.push(Buffer.from(chunk)))
+    child.stderr.on('data', chunk => stderr.push(Buffer.from(chunk)))
+    child.once('error', reject)
+    child.once('close', status => {
+      resolve({
+        status,
+        stdout: Buffer.concat(stdout).toString('utf8'),
+        stderr: Buffer.concat(stderr).toString('utf8'),
+      })
+    })
+  })
+}
+
 test('CLI smoke flow works for core commands', async t => {
   const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-e2e-'))
   t.after(async () => {
@@ -42,11 +68,11 @@ test('CLI smoke flow works for core commands', async t => {
 
   const listResult = runCli(['session', 'list'], workspace)
   assert.equal(listResult.status, 0)
-  assert.match(listResult.stdout, /daycli session list: scaffold ready/)
+  assert.match(listResult.stdout, /No sessions found\./)
 
   const resumeResult = runCli(['session', 'resume', 'smoke-session'], workspace)
-  assert.equal(resumeResult.status, 0)
-  assert.match(resumeResult.stdout, /daycli session resume: smoke-session/)
+  assert.notEqual(resumeResult.status, 0)
+  assert.match(resumeResult.stderr, /SESSION_NOT_FOUND/)
 
   const configResult = runCli(['config', 'set', 'ollama.model', 'llama3.2'], workspace)
   assert.equal(configResult.status, 0)
@@ -60,3 +86,124 @@ test('CLI smoke flow works for core commands', async t => {
   assert.notEqual(runResult.status, 0)
   assert.ok(runResult.stderr.length > 0)
 })
+
+test('run command persists a completed run session', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-run-session-'))
+  const server = createServer((request, response) => {
+    if (request.method !== 'POST' || request.url !== '/api/chat') {
+      response.writeHead(404)
+      response.end()
+      return
+    }
+
+    response.writeHead(200, {'content-type': 'application/json'})
+    response.end(
+      JSON.stringify({
+        model: 'mock-model',
+        message: {
+          role: 'assistant',
+          content: 'persisted response',
+        },
+      }),
+    )
+  })
+
+  await listen(server)
+
+  t.after(async () => {
+    await close(server)
+    await rm(workspace, {recursive: true, force: true})
+  })
+
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+
+  const runResult = await runCliAsync(
+    [
+      'run',
+      'remember this task',
+      '--model',
+      'mock-model',
+      '--base-url',
+      `http://127.0.0.1:${address.port}`,
+      '--timeout-ms',
+      '1000',
+    ],
+    workspace,
+  )
+
+  assert.equal(runResult.status, 0)
+  assert.match(runResult.stdout, /persisted response/)
+
+  const sessionDir = path.join(workspace, '.daycli', 'sessions')
+  const sessionFiles = (await readdir(sessionDir)).filter(file => file.endsWith('.json'))
+  assert.equal(sessionFiles.length, 1)
+  const sessionId = path.basename(sessionFiles[0] ?? '', '.json')
+  assert.match(runResult.stdout, new RegExp(`Session: ${sessionId}`))
+  assert.match(runResult.stdout, new RegExp(`Resume: daycli session resume ${sessionId}`))
+
+  const sessionRaw = await readFile(path.join(sessionDir, sessionFiles[0] ?? ''), 'utf8')
+  const session = JSON.parse(sessionRaw) as {
+    kind?: string
+    status?: string
+    title?: string
+    model?: string
+    messages?: Array<{role?: string; content?: string}>
+  }
+
+  assert.equal(session.kind, 'run')
+  assert.equal(session.status, 'completed')
+  assert.equal(session.title, 'remember this task')
+  assert.equal(session.model, 'mock-model')
+  assert.equal(session.messages?.length, 2)
+  assert.deepEqual(
+    session.messages?.map(message => [message.role, message.content]),
+    [
+      ['user', 'remember this task'],
+      ['assistant', 'persisted response'],
+    ],
+  )
+
+  const listResult = runCli(['session', 'list'], workspace)
+  assert.equal(listResult.status, 0)
+  assert.match(listResult.stdout, /ID\s+KIND\s+STATUS\s+UPDATED\s+MSGS\s+WORKSPACE\s+TITLE/)
+  assert.match(listResult.stdout, new RegExp(`${sessionId}\\s+run\\s+completed`))
+  assert.match(listResult.stdout, /remember this task/)
+  assert.match(listResult.stdout, new RegExp(escapeRegExp(workspace)))
+
+  const resumeResult = runCli(['session', 'resume', sessionId], workspace)
+  assert.equal(resumeResult.status, 0)
+  assert.match(resumeResult.stdout, new RegExp(`Session: ${sessionId}`))
+  assert.match(resumeResult.stdout, /Kind: run/)
+  assert.match(resumeResult.stdout, /Status: completed/)
+  assert.match(resumeResult.stdout, /Title: remember this task/)
+  assert.match(resumeResult.stdout, /Messages: 2/)
+  assert.match(resumeResult.stdout, /Run this command in an interactive terminal to continue the session\./)
+})
+
+function listen(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
+}
+
+function close(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close(error => {
+      if (error) {
+        reject(error)
+        return
+      }
+
+      resolve()
+    })
+  })
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}

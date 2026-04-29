@@ -1,4 +1,13 @@
-import {Args, Command} from '@oclif/core'
+import React from 'react'
+import {Args, Command, Flags} from '@oclif/core'
+import {render} from 'ink'
+import {loadDaycliConfig, resolveRunSettings} from '../../core/config'
+import {toAppError} from '../../core/errors'
+import {createLogger} from '../../core/observability'
+import {OllamaProvider} from '../../core/providers'
+import {SessionStore, type SessionMessageRole, type SessionRecord} from '../../core/storage'
+import {buildWorkspaceSummary} from '../../core/workspace'
+import {ChatApp} from '../../ui'
 
 export default class SessionResume extends Command {
   static override description = 'Resume a session by id'
@@ -10,8 +19,150 @@ export default class SessionResume extends Command {
     }),
   }
 
-  public async run(): Promise<void> {
-    const {args} = await this.parse(SessionResume)
-    this.log(`daycli session resume: ${args.id}`)
+  static override flags = {
+    model: Flags.string({
+      description: 'Ollama model name (overrides stored session and daycli.config.json)',
+    }),
+    'base-url': Flags.string({
+      description: 'Ollama base URL (overrides daycli.config.json)',
+    }),
+    'timeout-ms': Flags.integer({
+      description: 'Ollama request timeout in milliseconds (0 to disable timeout, overrides config)',
+      min: 0,
+    }),
+    system: Flags.string({
+      description: 'Optional extra system prompt for the resumed chat',
+    }),
   }
+
+  public async run(): Promise<void> {
+    const {args, flags} = await this.parse(SessionResume)
+    const logger = createLogger({command: 'session resume'})
+    const workspaceRoot = process.cwd()
+    const sessionStore = new SessionStore(workspaceRoot)
+
+    try {
+      const session = await sessionStore.get(args.id)
+
+      if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        this.log(formatResumeSummary(session))
+        return
+      }
+
+      const config = await loadDaycliConfig(workspaceRoot)
+      const settings = resolveRunSettings(config, {
+        model: flags.model ?? session.model,
+        baseUrl: flags['base-url'],
+        timeoutMs: flags['timeout-ms'],
+      })
+
+      const provider = new OllamaProvider({
+        model: settings.model,
+        baseUrl: settings.baseUrl,
+        timeoutMs: settings.timeoutMs,
+      })
+
+      if (session.status !== 'active') {
+        await sessionStore.updateStatus(session.id, 'active')
+      }
+
+      const systemPromptParts: string[] = []
+      if (flags.system) {
+        systemPromptParts.push(flags.system)
+      }
+
+      try {
+        const snapshot = await buildWorkspaceSummary(workspaceRoot)
+        systemPromptParts.push(
+          [
+            'You are an interactive coding assistant resuming an existing daycli session.',
+            'Use the visible session history and this workspace snapshot to continue naturally.',
+            'If information is not visible, state that limitation clearly and ask a focused follow-up question.',
+            `Workspace snapshot (entries=${snapshot.entryCount}, truncated=${snapshot.truncated ? 'yes' : 'no'}):`,
+            snapshot.summary,
+          ].join('\n'),
+        )
+        logger.info('workspace.snapshot.ready', 'workspace summary prepared for resumed chat', {
+          entries: snapshot.entryCount,
+          truncated: snapshot.truncated,
+        })
+      } catch (error) {
+        logger.warn('workspace.snapshot.failed', 'workspace summary unavailable; continuing without snapshot', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+
+      logger.info('session.resumed', 'session resumed', {
+        sessionId: session.id,
+        kind: session.kind,
+        messageCount: session.messages.length,
+      })
+
+      const app = render(
+        React.createElement(ChatApp, {
+          model: settings.model,
+          provider,
+          systemPrompt: systemPromptParts.length > 0 ? systemPromptParts.join('\n\n') : undefined,
+          sessionId: session.id,
+          initialMessages: session.messages
+            .filter(message => message.role !== 'tool')
+            .map(message => ({
+              role: toUiMessageRole(message.role),
+              content: message.content,
+            })),
+          persistMessage: async message => {
+            try {
+              await sessionStore.appendMessage(session.id, {
+                role: toSessionMessageRole(message.role),
+                content: message.content,
+              })
+              logger.debug('session.message.persisted', 'resumed chat message persisted', {
+                sessionId: session.id,
+                role: message.role,
+              })
+            } catch (error) {
+              logger.warn('session.message.failed', 'failed to persist resumed chat message', {
+                sessionId: session.id,
+                role: message.role,
+                error: error instanceof Error ? error.message : String(error),
+              })
+            }
+          },
+        }),
+      )
+      await app.waitUntilExit()
+    } catch (error) {
+      const appError = toAppError(error)
+      logger.error('command.error', appError.message, {
+        code: appError.code,
+        ...(appError.meta ?? {}),
+      })
+      this.error(`[${appError.code}] ${appError.message}`, {exit: 1})
+    }
+  }
+}
+
+function formatResumeSummary(session: SessionRecord): string {
+  return [
+    `Session: ${session.id}`,
+    `Kind: ${session.kind}`,
+    `Status: ${session.status}`,
+    `Title: ${session.title}`,
+    `Workspace: ${session.workspaceRoot}`,
+    `Model: ${session.model ?? '(none)'}`,
+    `Messages: ${session.messages.length}`,
+    'Run this command in an interactive terminal to continue the session.',
+  ].join('\n')
+}
+
+function toUiMessageRole(role: SessionMessageRole): 'system' | 'user' | 'assistant' {
+  if (role === 'tool') {
+    return 'system'
+  }
+
+  return role
+}
+
+function toSessionMessageRole(role: 'system' | 'user' | 'assistant'): SessionMessageRole {
+  return role
 }

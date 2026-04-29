@@ -5,6 +5,7 @@ import {loadDaycliConfig, resolveRunSettings} from '../core/config'
 import {toAppError} from '../core/errors'
 import {createLogger} from '../core/observability'
 import {OllamaProvider} from '../core/providers'
+import {SessionStore, type SessionMessageRole} from '../core/storage'
 import {buildWorkspaceSummary} from '../core/workspace'
 import {ChatApp} from '../ui'
 
@@ -50,6 +51,20 @@ export default class Chat extends Command {
         baseUrl: settings.baseUrl,
         timeoutMs: settings.timeoutMs,
       })
+      const sessionStore = new SessionStore(workspaceRoot)
+      const session = await sessionStore.create({
+        kind: 'chat',
+        title: 'Interactive chat',
+        workspaceRoot,
+        model: settings.model,
+        metadata: {
+          command: 'chat',
+          hasCustomSystemPrompt: flags.system !== undefined,
+        },
+      })
+      logger.info('session.created', 'chat session created', {
+        sessionId: session.id,
+      })
 
       const systemPromptParts: string[] = []
       if (flags.system) {
@@ -82,6 +97,25 @@ export default class Chat extends Command {
           model: settings.model,
           provider,
           systemPrompt: systemPromptParts.length > 0 ? systemPromptParts.join('\n\n') : undefined,
+          sessionId: session.id,
+          persistMessage: async message => {
+            try {
+              await sessionStore.appendMessage(session.id, {
+                role: toSessionMessageRole(message.role),
+                content: message.content,
+              })
+              logger.debug('session.message.persisted', 'chat message persisted', {
+                sessionId: session.id,
+                role: message.role,
+              })
+            } catch (error) {
+              logger.warn('session.message.failed', 'failed to persist chat message', {
+                sessionId: session.id,
+                role: message.role,
+                error: error instanceof Error ? error.message : String(error),
+              })
+            }
+          },
         }),
       )
       await app.waitUntilExit()
@@ -94,4 +128,8 @@ export default class Chat extends Command {
       this.error(`[${appError.code}] ${appError.message}`, {exit: 1})
     }
   }
+}
+
+function toSessionMessageRole(role: 'system' | 'user' | 'assistant'): SessionMessageRole {
+  return role
 }

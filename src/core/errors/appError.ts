@@ -5,6 +5,9 @@ export type ErrorCode =
   | 'OLLAMA_TIMEOUT'
   | 'OLLAMA_RESPONSE_ERROR'
   | 'OLLAMA_NETWORK_ERROR'
+  | 'SESSION_INVALID'
+  | 'SESSION_IO_ERROR'
+  | 'SESSION_NOT_FOUND'
   | 'TOOL_UNKNOWN'
   | 'TOOL_APPROVAL_REQUIRED'
   | 'TOOL_APPROVAL_REJECTED'
@@ -44,4 +47,3 @@ export function toAppError(error: unknown): AppError {
 
   return new AppError('INTERNAL_ERROR', String(error))
 }
-
