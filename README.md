@@ -75,21 +75,27 @@ Supported keys:
 
 - `provider.type` (`ollama`, `openai`, `anthropic`, `openrouter`, `gemini`, or `mistral`)
 - `ollama.model`
+- `ollama.embeddingModel`
 - `ollama.baseUrl`
 - `ollama.timeoutMs`
 - `openai.model`
+- `openai.embeddingModel`
 - `openai.baseUrl`
 - `openai.timeoutMs`
 - `anthropic.model`
+- `anthropic.embeddingModel`
 - `anthropic.baseUrl`
 - `anthropic.timeoutMs`
 - `openrouter.model`
+- `openrouter.embeddingModel`
 - `openrouter.baseUrl`
 - `openrouter.timeoutMs`
 - `gemini.model`
+- `gemini.embeddingModel`
 - `gemini.baseUrl`
 - `gemini.timeoutMs`
 - `mistral.model`
+- `mistral.embeddingModel`
 - `mistral.baseUrl`
 - `mistral.timeoutMs`
 
@@ -103,6 +109,7 @@ Examples:
 
 ./bin/run.js config set provider.type openai
 ./bin/run.js config set openai.model gpt-4.1-mini
+./bin/run.js config set openai.embeddingModel text-embedding-3-small
 
 ./bin/run.js config set provider.type anthropic
 ./bin/run.js config set anthropic.model claude-3-5-sonnet-latest
@@ -112,9 +119,11 @@ Examples:
 
 ./bin/run.js config set provider.type gemini
 ./bin/run.js config set gemini.model gemini-3.5-flash
+./bin/run.js config set gemini.embeddingModel gemini-embedding-001
 
 ./bin/run.js config set provider.type mistral
 ./bin/run.js config set mistral.model mistral-large-latest
+./bin/run.js config set mistral.embeddingModel mistral-embed
 ```
 
 ### `daycli session list`
@@ -164,6 +173,7 @@ Example:
   },
   "openai": {
     "model": "gpt-4.1-mini",
+    "embeddingModel": "text-embedding-3-small",
     "baseUrl": "https://api.openai.com/v1",
     "timeoutMs": 180000
   },
@@ -179,11 +189,13 @@ Example:
   },
   "gemini": {
     "model": "gemini-3.5-flash",
+    "embeddingModel": "gemini-embedding-001",
     "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
     "timeoutMs": 180000
   },
   "mistral": {
     "model": "mistral-large-latest",
+    "embeddingModel": "mistral-embed",
     "baseUrl": "https://api.mistral.ai/v1",
     "timeoutMs": 180000
   }
@@ -199,6 +211,10 @@ export OPENROUTER_API_KEY=...
 export GEMINI_API_KEY=...
 export MISTRAL_API_KEY=...
 ```
+
+## Retrieval
+
+`daycli run` builds a workspace code index in `.daycli/index/chunks.json` and injects relevant code context into the agent prompt. When the selected provider supports embeddings and has an `embeddingModel`, chunks are embedded incrementally and retrieval uses hybrid scoring: cosine similarity plus the existing keyword/symbol/path ranking. If embeddings are unavailable or an embeddings request fails, retrieval falls back to keyword ranking automatically.
 
 ## Safety Notes
 

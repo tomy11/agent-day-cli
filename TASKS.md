@@ -88,13 +88,13 @@
 - [x] M12 (Multi-provider support): support `daycli config set provider.type` with validation and clear error codes
 - [x] M12 (Multi-provider support): add unit tests per provider, factory selection, and parsing fallback
 - [x] M12 (Multi-provider support): update docs with per-provider setup and tool-calling differences
-- [ ] M13 (Embedding-based retrieval): add an embeddings endpoint to the provider abstraction (depends on M12)
-- [ ] M13 (Embedding-based retrieval): extend `CodeChunk` and IndexStore to persist embedding vectors with incremental re-embedding
-- [ ] M13 (Embedding-based retrieval): implement cosine vector search in the Retriever
-- [ ] M13 (Embedding-based retrieval): add hybrid ranking that combines vector and existing TF-IDF scores with a configurable weight
-- [ ] M13 (Embedding-based retrieval): add graceful fallback to keyword retrieval when no embeddings provider is available
-- [ ] M13 (Embedding-based retrieval): add tests for vector recall, hybrid scoring, incremental re-embed, and fallback
-- [ ] M13 (Embedding-based retrieval): update docs with embedding model setup and hybrid retrieval explanation
+- [x] M13 (Embedding-based retrieval): add an embeddings endpoint to the provider abstraction (depends on M12)
+- [x] M13 (Embedding-based retrieval): extend `CodeChunk` and IndexStore to persist embedding vectors with incremental re-embedding
+- [x] M13 (Embedding-based retrieval): implement cosine vector search in the Retriever
+- [x] M13 (Embedding-based retrieval): add hybrid ranking that combines vector and existing TF-IDF scores with a configurable weight
+- [x] M13 (Embedding-based retrieval): add graceful fallback to keyword retrieval when no embeddings provider is available
+- [x] M13 (Embedding-based retrieval): add tests for vector recall, hybrid scoring, incremental re-embed, and fallback
+- [x] M13 (Embedding-based retrieval): update docs with embedding model setup and hybrid retrieval explanation
 
 ## In Progress
 - [ ] (none)

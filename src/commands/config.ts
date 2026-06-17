@@ -13,7 +13,7 @@ export default class Config extends Command {
       options: ['set'],
     }),
     key: Args.string({
-      description: 'Config key (provider.type | <provider>.model | <provider>.baseUrl | <provider>.timeoutMs)',
+      description: 'Config key (provider.type | <provider>.model | <provider>.embeddingModel | <provider>.baseUrl | <provider>.timeoutMs)',
       required: true,
     }),
     value: Args.string({
@@ -48,6 +48,10 @@ export default class Config extends Command {
         setProviderValue(config, 'ollama', 'model', args.value)
         break
       }
+      case 'ollama.embeddingModel': {
+        setProviderValue(config, 'ollama', 'embeddingModel', args.value)
+        break
+      }
       case 'ollama.baseUrl': {
         setProviderValue(config, 'ollama', 'baseUrl', args.value)
         break
@@ -58,6 +62,10 @@ export default class Config extends Command {
       }
       case 'openai.model': {
         setProviderValue(config, 'openai', 'model', args.value)
+        break
+      }
+      case 'openai.embeddingModel': {
+        setProviderValue(config, 'openai', 'embeddingModel', args.value)
         break
       }
       case 'openai.baseUrl': {
@@ -72,6 +80,10 @@ export default class Config extends Command {
         setProviderValue(config, 'anthropic', 'model', args.value)
         break
       }
+      case 'anthropic.embeddingModel': {
+        setProviderValue(config, 'anthropic', 'embeddingModel', args.value)
+        break
+      }
       case 'anthropic.baseUrl': {
         setProviderValue(config, 'anthropic', 'baseUrl', args.value)
         break
@@ -82,6 +94,10 @@ export default class Config extends Command {
       }
       case 'openrouter.model': {
         setProviderValue(config, 'openrouter', 'model', args.value)
+        break
+      }
+      case 'openrouter.embeddingModel': {
+        setProviderValue(config, 'openrouter', 'embeddingModel', args.value)
         break
       }
       case 'openrouter.baseUrl': {
@@ -96,6 +112,10 @@ export default class Config extends Command {
         setProviderValue(config, 'gemini', 'model', args.value)
         break
       }
+      case 'gemini.embeddingModel': {
+        setProviderValue(config, 'gemini', 'embeddingModel', args.value)
+        break
+      }
       case 'gemini.baseUrl': {
         setProviderValue(config, 'gemini', 'baseUrl', args.value)
         break
@@ -106,6 +126,10 @@ export default class Config extends Command {
       }
       case 'mistral.model': {
         setProviderValue(config, 'mistral', 'model', args.value)
+        break
+      }
+      case 'mistral.embeddingModel': {
+        setProviderValue(config, 'mistral', 'embeddingModel', args.value)
         break
       }
       case 'mistral.baseUrl': {
@@ -129,7 +153,7 @@ export default class Config extends Command {
 function setProviderValue(
   config: DaycliConfig,
   provider: ProviderType,
-  key: 'model' | 'baseUrl',
+  key: 'model' | 'embeddingModel' | 'baseUrl',
   value: string,
 ): void {
   config[provider] = {

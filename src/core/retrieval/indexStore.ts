@@ -2,10 +2,17 @@ import {mkdir, readdir, readFile, stat, writeFile} from 'node:fs/promises'
 import path from 'node:path'
 import {buildChunksForFile} from './chunker'
 import type {CodeChunk, CodeIndex, IndexedFile} from './types'
+import type {LlmProvider} from '../providers'
 
 const INDEX_DIR = path.join('.daycli', 'index')
 const INDEX_PATH = path.join(INDEX_DIR, 'chunks.json')
-const INDEX_VERSION = 2
+const INDEX_VERSION = 3
+const EMBEDDING_BATCH_SIZE = 24
+
+export interface IndexBuildOptions {
+  embeddingProvider?: Pick<LlmProvider, 'embed'>
+  embeddingModel?: string
+}
 
 const IGNORED_DIRS = new Set([
   '.git',
@@ -29,7 +36,7 @@ const ALLOWED_EXTENSIONS = new Set([
 
 const MAX_FILE_SIZE_BYTES = 250_000
 
-export async function loadOrBuildIndex(workspaceRoot: string): Promise<CodeIndex> {
+export async function loadOrBuildIndex(workspaceRoot: string, options: IndexBuildOptions = {}): Promise<CodeIndex> {
   const indexFilePath = getIndexPath(workspaceRoot)
   const normalizedRoot = path.resolve(workspaceRoot)
 
@@ -38,7 +45,18 @@ export async function loadOrBuildIndex(workspaceRoot: string): Promise<CodeIndex
     const parsed = JSON.parse(raw) as unknown
     if (isValidIndex(parsed) && parsed.workspaceRoot === normalizedRoot && parsed.version === INDEX_VERSION) {
       const refreshed = await refreshIndexIncrementally(workspaceRoot, parsed)
-      if (refreshed.changed) {
+      const embedded = await ensureChunkEmbeddings(
+        refreshed.index.chunks,
+        options.embeddingProvider,
+        options.embeddingModel,
+      )
+
+      if (refreshed.changed || embedded.changed) {
+        refreshed.index = {
+          ...refreshed.index,
+          generatedAt: new Date().toISOString(),
+          chunks: embedded.chunks,
+        }
         await saveIndex(workspaceRoot, refreshed.index)
       }
 
@@ -48,16 +66,18 @@ export async function loadOrBuildIndex(workspaceRoot: string): Promise<CodeIndex
     // no-op: build new index below
   }
 
-  return buildAndSaveIndex(workspaceRoot)
+  return buildAndSaveIndex(workspaceRoot, options)
 }
 
-async function buildAndSaveIndex(workspaceRoot: string): Promise<CodeIndex> {
+async function buildAndSaveIndex(workspaceRoot: string, options: IndexBuildOptions): Promise<CodeIndex> {
   const files = await collectSourceFiles(workspaceRoot, workspaceRoot)
-  const chunks: CodeChunk[] = []
+  let chunks: CodeChunk[] = []
 
   for (const file of files) {
     chunks.push(...(await buildChunksForIndexedFile(workspaceRoot, file)))
   }
+
+  chunks = (await ensureChunkEmbeddings(chunks, options.embeddingProvider, options.embeddingModel)).chunks
 
   const index: CodeIndex = {
     version: INDEX_VERSION,
@@ -197,6 +217,61 @@ async function buildChunksForIndexedFile(workspaceRoot: string, file: IndexedFil
   } catch {
     return []
   }
+}
+
+async function ensureChunkEmbeddings(
+  chunks: CodeChunk[],
+  embeddingProvider: Pick<LlmProvider, 'embed'> | undefined,
+  expectedModel: string | undefined,
+): Promise<{chunks: CodeChunk[]; changed: boolean}> {
+  if (!embeddingProvider?.embed || chunks.length === 0) {
+    return {chunks, changed: false}
+  }
+
+  let changed = false
+  const output = chunks.slice()
+
+  for (let start = 0; start < output.length; start += EMBEDDING_BATCH_SIZE) {
+    const batch = output.slice(start, start + EMBEDDING_BATCH_SIZE)
+    const pending = batch
+      .map((chunk, index) => ({chunk, index: start + index}))
+      .filter(item => !item.chunk.embedding || (expectedModel !== undefined && item.chunk.embedding.model !== expectedModel))
+
+    if (pending.length === 0) {
+      continue
+    }
+
+    const response = await embeddingProvider.embed({
+      inputs: pending.map(item => formatChunkForEmbedding(item.chunk)),
+    })
+
+    response.embeddings.forEach((vector, index) => {
+      const target = pending[index]
+      if (!target) {
+        return
+      }
+
+      output[target.index] = {
+        ...target.chunk,
+        embedding: {
+          model: response.model,
+          vector,
+        },
+      }
+      changed = true
+    })
+  }
+
+  return {chunks: output, changed}
+}
+
+function formatChunkForEmbedding(chunk: CodeChunk): string {
+  return [
+    `path: ${chunk.filePath}`,
+    chunk.symbol ? `symbol: ${chunk.symbol}` : undefined,
+    chunk.imports.length > 0 ? `imports: ${chunk.imports.join(', ')}` : undefined,
+    chunk.content,
+  ].filter((part): part is string => Boolean(part)).join('\n')
 }
 
 function groupChunksByFile(chunks: CodeChunk[]): Map<string, CodeChunk[]> {

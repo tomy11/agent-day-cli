@@ -48,7 +48,7 @@ Command Handler <-> SessionStore (.daycli/sessions/*.json)
 9. แสดงผลสุดท้ายให้ผู้ใช้ พร้อม log ที่ตรวจสอบย้อนหลังได้
 
 ## Provider Selection
-`src/core/config/daycliConfig.ts` supports `provider.type` with `ollama` as the backward-compatible default. Provider-specific sections (`ollama`, `openai`, `anthropic`, `openrouter`, `gemini`, and `mistral`) hold `model`, `baseUrl`, and `timeoutMs`.
+`src/core/config/daycliConfig.ts` supports `provider.type` with `ollama` as the backward-compatible default. Provider-specific sections (`ollama`, `openai`, `anthropic`, `openrouter`, `gemini`, and `mistral`) hold `model`, optional `embeddingModel`, `baseUrl`, and `timeoutMs`.
 
 `src/core/providers/providerFactory.ts` maps resolved settings to:
 
@@ -59,6 +59,8 @@ Command Handler <-> SessionStore (.daycli/sessions/*.json)
 - `GeminiProvider`: Gemini `generateContent` flow with native `functionDeclarations`.
 - `MistralProvider`: Mistral `/v1/chat/completions` flow with OpenAI-compatible native function tools.
 
+Providers that expose embeddings implement optional `embed()` on the same `LlmProvider` interface. OpenAI and Mistral use `/embeddings`; Gemini uses `batchEmbedContents`. `AgentOrchestrator` still depends only on `chat()`, while retrieval asks for `embed()` when available.
+
 Cloud API keys are read from environment variables only:
 
 - `OPENAI_API_KEY`
@@ -68,6 +70,11 @@ Cloud API keys are read from environment variables only:
 - `MISTRAL_API_KEY`
 
 The keys are not part of config validation, provider settings, logs, or session metadata. Native provider tool calls are normalized into the same JSON tool-call contract that the `AgentOrchestrator` already consumes.
+
+## Hybrid Retrieval
+`src/core/retrieval/indexStore.ts` writes `.daycli/index/chunks.json` with index version 3. `CodeChunk.embedding` is optional and stores `{model, vector}` so existing keyword retrieval remains valid when embeddings are not configured. Incremental refresh keeps embeddings for unchanged chunks, embeds new or changed chunks, and re-embeds chunks when the configured `embeddingModel` changes.
+
+`src/core/retrieval/retriever.ts` uses keyword/symbol/path scoring by default. When `buildCodeContext` can obtain a query embedding, ranking switches to hybrid mode and combines normalized keyword score with cosine similarity using a configurable embedding weight. Any embedding provider failure is treated as non-fatal and falls back to keyword retrieval.
 
 ## Agent Loop Sequence
 `daycli run` และ `daycli chat` ใช้ `AgentOrchestrator` เพื่อเรียก provider ซ้ำจนได้ final answer หรือชน guard limit
@@ -228,6 +235,8 @@ The loader resolves `daycli.policy.json` inside the workspace by default, valida
 - `src/core/providers/openrouter/OpenRouterProvider.ts` : เชื่อม OpenRouter chat completions API
 - `src/core/providers/gemini/GeminiProvider.ts` : เชื่อม Gemini generateContent API
 - `src/core/providers/mistral/MistralProvider.ts` : เชื่อม Mistral chat completions API
+- `src/core/retrieval/indexStore.ts` : สร้าง code index, refresh แบบ incremental, และ persist embeddings
+- `src/core/retrieval/retriever.ts` : rank chunks ด้วย keyword หรือ hybrid cosine ranking
 - `src/core/batch/batchMode.ts` : batch CLI contract and non-interactive behavior
 - `src/core/batch/policyFile.ts` : batch policy schema, loader, validation, and `policyToSafetyPolicy` converter
 - `src/core/batch/policyApprovalManager.ts` : approval manager that evaluates tool calls against the loaded batch policy

@@ -31,6 +31,7 @@ test('resolveRunSettings selects provider-specific config', () => {
     {
       type: 'openai',
       model: 'gpt-test',
+      embeddingModel: 'text-embedding-3-small',
       baseUrl: 'https://example.test/v1',
       timeoutMs: 1234,
     },
@@ -65,6 +66,7 @@ test('resolveRunSettings supports Gemini defaults', () => {
     {
       type: 'gemini',
       model: 'gemini-3.5-flash',
+      embeddingModel: 'gemini-embedding-001',
       baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
       timeoutMs: 180_000,
     },
@@ -82,6 +84,7 @@ test('resolveRunSettings supports Mistral defaults', () => {
     {
       type: 'mistral',
       model: 'mistral-large-latest',
+      embeddingModel: 'mistral-embed',
       baseUrl: 'https://api.mistral.ai/v1',
       timeoutMs: 180_000,
     },

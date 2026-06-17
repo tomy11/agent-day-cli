@@ -125,6 +125,10 @@ test('CLI smoke flow works for core commands', async t => {
   assert.equal(geminiConfigResult.status, 0)
   assert.match(geminiConfigResult.stdout, /Updated daycli\.config\.json: gemini\.model=gemini-3\.5-flash/)
 
+  const geminiEmbeddingConfigResult = runCli(['config', 'set', 'gemini.embeddingModel', 'gemini-embedding-001'], workspace)
+  assert.equal(geminiEmbeddingConfigResult.status, 0)
+  assert.match(geminiEmbeddingConfigResult.stdout, /Updated daycli\.config\.json: gemini\.embeddingModel=gemini-embedding-001/)
+
   const mistralConfigResult = runCli(['config', 'set', 'mistral.model', 'mistral-large-latest'], workspace)
   assert.equal(mistralConfigResult.status, 0)
   assert.match(mistralConfigResult.stdout, /Updated daycli\.config\.json: mistral\.model=mistral-large-latest/)
@@ -134,13 +138,14 @@ test('CLI smoke flow works for core commands', async t => {
     provider?: {type?: string}
     ollama?: {model?: string}
     openrouter?: {model?: string}
-    gemini?: {model?: string}
+    gemini?: {model?: string; embeddingModel?: string}
     mistral?: {model?: string}
   }
   assert.equal(config.provider?.type, 'openai')
   assert.equal(config.ollama?.model, 'llama3.2')
   assert.equal(config.openrouter?.model, 'anthropic/claude-sonnet-4.5')
   assert.equal(config.gemini?.model, 'gemini-3.5-flash')
+  assert.equal(config.gemini?.embeddingModel, 'gemini-embedding-001')
   assert.equal(config.mistral?.model, 'mistral-large-latest')
 
   const runResult = runCli(['run', 'smoke prompt', '--timeout-ms', '-1'], workspace)

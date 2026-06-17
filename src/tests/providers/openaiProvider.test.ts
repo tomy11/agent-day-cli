@@ -87,3 +87,46 @@ test('OpenAIProvider requires OPENAI_API_KEY when apiKey option is absent', () =
     }
   }
 })
+
+test('OpenAIProvider creates embeddings with the configured embedding model', async () => {
+  const originalFetch = globalThis.fetch
+  let requestUrl = ''
+  let requestBody: Record<string, unknown> | undefined
+
+  globalThis.fetch = (async (input, init) => {
+    requestUrl = String(input)
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+    return new Response(
+      JSON.stringify({
+        model: 'text-embedding-3-small',
+        data: [
+          {index: 1, embedding: [0, 1]},
+          {index: 0, embedding: [1, 0]},
+        ],
+      }),
+      {status: 200},
+    )
+  }) as typeof fetch
+
+  try {
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      model: 'gpt-test',
+      embeddingModel: 'text-embedding-3-small',
+      baseUrl: 'https://api.openai.test/v1',
+      timeoutMs: 1000,
+    })
+
+    const response = await provider.embed({inputs: ['alpha', 'beta']})
+
+    assert.equal(requestUrl, 'https://api.openai.test/v1/embeddings')
+    assert.deepEqual(requestBody, {
+      model: 'text-embedding-3-small',
+      input: ['alpha', 'beta'],
+      encoding_format: 'float',
+    })
+    assert.deepEqual(response.embeddings, [[1, 0], [0, 1]])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})

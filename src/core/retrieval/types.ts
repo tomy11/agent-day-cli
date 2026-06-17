@@ -10,6 +10,12 @@ export interface CodeChunk {
   content: string
   indexInFile: number
   totalChunksInFile: number
+  embedding?: CodeChunkEmbedding
+}
+
+export interface CodeChunkEmbedding {
+  model: string
+  vector: number[]
 }
 
 export interface IndexedFile {
@@ -31,11 +37,14 @@ export interface RankedChunk {
   score: number
   stage1Score: number
   stage2Score: number
+  vectorScore?: number
 }
 
 export interface RetrievalOptions {
   candidateLimit?: number
   topK?: number
+  queryEmbedding?: number[]
+  embeddingWeight?: number
 }
 
 export interface ContextAssemblyOptions {

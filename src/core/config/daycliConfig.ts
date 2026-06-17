@@ -7,6 +7,7 @@ export const DAYCLI_CONFIG_FILE = 'daycli.config.json'
 
 export interface ProviderConfig {
   model?: string
+  embeddingModel?: string
   baseUrl?: string
   timeoutMs?: number
 }
@@ -40,6 +41,7 @@ const DEFAULT_PROVIDER_SETTINGS: Record<ProviderType, Omit<ProviderSettings, 'ty
   },
   openai: {
     model: 'gpt-4.1-mini',
+    embeddingModel: 'text-embedding-3-small',
     baseUrl: 'https://api.openai.com/v1',
     timeoutMs: 180_000,
   },
@@ -55,11 +57,13 @@ const DEFAULT_PROVIDER_SETTINGS: Record<ProviderType, Omit<ProviderSettings, 'ty
   },
   gemini: {
     model: 'gemini-3.5-flash',
+    embeddingModel: 'gemini-embedding-001',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     timeoutMs: 180_000,
   },
   mistral: {
     model: 'mistral-large-latest',
+    embeddingModel: 'mistral-embed',
     baseUrl: 'https://api.mistral.ai/v1',
     timeoutMs: 180_000,
   },
@@ -114,6 +118,9 @@ export function resolveRunSettings(config: DaycliConfig, overrides: RunFlagOverr
   return {
     type,
     model: overrides.model ?? providerConfig?.model ?? defaults.model,
+    ...(providerConfig?.embeddingModel ?? defaults.embeddingModel
+      ? {embeddingModel: providerConfig?.embeddingModel ?? defaults.embeddingModel}
+      : {}),
     baseUrl: overrides.baseUrl ?? providerConfig?.baseUrl ?? defaults.baseUrl,
     timeoutMs: timeout,
   }
@@ -179,10 +186,14 @@ function validateProviderConfig(input: ProviderConfig | undefined, key: Provider
     throw new AppError('CONFIG_INVALID', `Invalid ${DAYCLI_CONFIG_FILE}: "${key}" must be an object`)
   }
 
-  const {model, baseUrl, timeoutMs} = input
+  const {model, embeddingModel, baseUrl, timeoutMs} = input
 
   if (model !== undefined && typeof model !== 'string') {
     throw new AppError('CONFIG_INVALID', `Invalid ${DAYCLI_CONFIG_FILE}: "${key}.model" must be a string`)
+  }
+
+  if (embeddingModel !== undefined && typeof embeddingModel !== 'string') {
+    throw new AppError('CONFIG_INVALID', `Invalid ${DAYCLI_CONFIG_FILE}: "${key}.embeddingModel" must be a string`)
   }
 
   if (baseUrl !== undefined && typeof baseUrl !== 'string') {
@@ -201,6 +212,7 @@ function validateProviderConfig(input: ProviderConfig | undefined, key: Provider
 
   return {
     ...(model !== undefined ? {model} : {}),
+    ...(embeddingModel !== undefined ? {embeddingModel} : {}),
     ...(baseUrl !== undefined ? {baseUrl} : {}),
     ...(timeoutMs !== undefined ? {timeoutMs} : {}),
   }

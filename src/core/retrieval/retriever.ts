@@ -2,6 +2,15 @@ import type {CodeChunk, RankedChunk, RetrievalOptions} from './types'
 
 const DEFAULT_CANDIDATE_LIMIT = 40
 const DEFAULT_TOP_K = 8
+const DEFAULT_EMBEDDING_WEIGHT = 0.65
+
+interface RetrievalCandidate {
+  chunk: CodeChunk
+  stage1Score: number
+  stage2Score: number
+  keywordScore: number
+  vectorScore: number | undefined
+}
 
 export function rankRelevantChunks(
   chunks: CodeChunk[],
@@ -9,44 +18,63 @@ export function rankRelevantChunks(
   options: RetrievalOptions = {},
 ): RankedChunk[] {
   const queryTokens = tokenize(query)
-  if (queryTokens.length === 0 || chunks.length === 0) {
+  const hasQueryEmbedding = Array.isArray(options.queryEmbedding) && options.queryEmbedding.length > 0
+  if ((queryTokens.length === 0 && !hasQueryEmbedding) || chunks.length === 0) {
     return []
   }
 
   const candidateLimit = options.candidateLimit ?? DEFAULT_CANDIDATE_LIMIT
   const topK = options.topK ?? DEFAULT_TOP_K
 
-  const stage1 = chunks
+  const keywordCandidates = chunks
     .map(chunk => {
       const chunkTokens = tokenize(chunk.content)
-      if (chunkTokens.length === 0) {
+      const stage1Score = chunkTokens.length > 0 ? computeStage1Score(queryTokens, chunkTokens) : 0
+      const stage2Score = computeStage2Score(queryTokens, chunk)
+      const keywordScore = stage1Score + stage2Score
+      const vectorScore = hasQueryEmbedding
+        ? computeCosineSimilarity(options.queryEmbedding ?? [], chunk.embedding?.vector)
+        : undefined
+
+      if (keywordScore <= 0 && (vectorScore ?? 0) <= 0) {
         return undefined
       }
 
-      const stage1Score = computeStage1Score(queryTokens, chunkTokens)
-      if (stage1Score <= 0) {
-        return undefined
-      }
-
-      return {chunk, stage1Score}
+      return {chunk, stage1Score, stage2Score, keywordScore, vectorScore}
     })
-    .filter((value): value is {chunk: CodeChunk; stage1Score: number} => Boolean(value))
-    .sort((a, b) => b.stage1Score - a.stage1Score)
+    .filter((value): value is RetrievalCandidate => value !== undefined)
+    .sort((a, b) => {
+      if (hasQueryEmbedding) {
+        return computeHybridScore(b.keywordScore, b.vectorScore, options.embeddingWeight) -
+          computeHybridScore(a.keywordScore, a.vectorScore, options.embeddingWeight)
+      }
+
+      return b.keywordScore - a.keywordScore
+    })
     .slice(0, candidateLimit)
 
-  return stage1
+  return keywordCandidates
     .map(candidate => {
-      const stage2Score = computeStage2Score(queryTokens, candidate.chunk)
-      const score = candidate.stage1Score + stage2Score
+      const score = hasQueryEmbedding
+        ? computeHybridScore(candidate.keywordScore, candidate.vectorScore, options.embeddingWeight)
+        : candidate.keywordScore
+
       return {
         chunk: candidate.chunk,
         score,
         stage1Score: candidate.stage1Score,
-        stage2Score,
+        stage2Score: candidate.stage2Score,
+        ...(candidate.vectorScore !== undefined ? {vectorScore: candidate.vectorScore} : {}),
       }
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, topK)
+}
+
+function computeHybridScore(keywordScore: number, vectorScore: number | undefined, embeddingWeight: number | undefined): number {
+  const boundedWeight = clamp(embeddingWeight ?? DEFAULT_EMBEDDING_WEIGHT, 0, 1)
+  const normalizedKeyword = keywordScore / (keywordScore + 1)
+  return (normalizedKeyword * (1 - boundedWeight)) + ((vectorScore ?? 0) * boundedWeight)
 }
 
 function computeStage1Score(queryTokens: string[], chunkTokens: string[]): number {
@@ -87,6 +115,38 @@ function computeStage2Score(queryTokens: string[], chunk: CodeChunk): number {
   }
 
   return score
+}
+
+function computeCosineSimilarity(queryVector: number[], chunkVector: number[] | undefined): number {
+  if (!chunkVector || queryVector.length === 0 || queryVector.length !== chunkVector.length) {
+    return 0
+  }
+
+  let dot = 0
+  let queryMagnitude = 0
+  let chunkMagnitude = 0
+
+  for (let index = 0; index < queryVector.length; index += 1) {
+    const queryValue = queryVector[index] ?? 0
+    const chunkValue = chunkVector[index] ?? 0
+    dot += queryValue * chunkValue
+    queryMagnitude += queryValue * queryValue
+    chunkMagnitude += chunkValue * chunkValue
+  }
+
+  if (queryMagnitude === 0 || chunkMagnitude === 0) {
+    return 0
+  }
+
+  return Math.max(0, dot / (Math.sqrt(queryMagnitude) * Math.sqrt(chunkMagnitude)))
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min
+  }
+
+  return Math.min(max, Math.max(min, value))
 }
 
 function tokenize(input: string): string[] {

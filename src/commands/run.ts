@@ -159,6 +159,8 @@ export default class Run extends Command {
         const codeContext = await buildCodeContext({
           workspaceRoot,
           query: args.task,
+          embeddingProvider: provider,
+          embeddingModel: settings.embeddingModel,
         })
 
         if (codeContext.context.length > 0) {
@@ -171,6 +173,7 @@ export default class Run extends Command {
           logger.info('retrieval.context.done', 'retrieval context assembled', {
             chunkCount: codeContext.chunkCount,
             truncated: codeContext.truncated,
+            mode: codeContext.retrievalMode,
           })
           retrievalSummary = {
             chunkCount: codeContext.chunkCount,

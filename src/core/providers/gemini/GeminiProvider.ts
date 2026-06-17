@@ -1,4 +1,4 @@
-import type {ChatMessage, ChatRequest, ChatResponse, LlmProvider} from '../types'
+import type {ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, LlmProvider} from '../types'
 import type {ToolDefinition} from '../../tools'
 import {AppError} from '../../errors'
 import {formatNativeToolCallResponse} from '../nativeToolCalls'
@@ -8,6 +8,7 @@ interface GeminiProviderOptions {
   apiKey?: string
   baseUrl?: string
   model: string
+  embeddingModel?: string
   timeoutMs?: number
   tools?: ToolDefinition[]
 }
@@ -36,6 +37,15 @@ interface GeminiResponse {
   }>
 }
 
+interface GeminiEmbeddingResponse {
+  error?: {
+    message?: string
+  }
+  embeddings?: Array<{
+    values?: number[]
+  }>
+}
+
 interface GeminiContent {
   role: 'user' | 'model'
   parts: Array<{text: string}>
@@ -45,6 +55,7 @@ export class GeminiProvider implements LlmProvider {
   private readonly apiKey: string
   private readonly baseUrl: string
   private readonly model: string
+  private readonly embeddingModel?: string
   private readonly timeoutMs: number
   private readonly tools: ToolDefinition[]
 
@@ -52,6 +63,7 @@ export class GeminiProvider implements LlmProvider {
     this.apiKey = options.apiKey ?? process.env.GEMINI_API_KEY ?? ''
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta')
     this.model = options.model
+    this.embeddingModel = options.embeddingModel
     this.timeoutMs = options.timeoutMs ?? 60_000
     this.tools = options.tools ?? []
 
@@ -158,6 +170,83 @@ export class GeminiProvider implements LlmProvider {
       throw new AppError('GEMINI_NETWORK_ERROR', `Gemini network error: ${getErrorMessage(error)}`, {
         cause: error,
         meta: {model: this.model, baseUrl: this.baseUrl},
+      })
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout)
+      }
+    }
+  }
+
+  public async embed(request: EmbeddingRequest): Promise<EmbeddingResponse> {
+    if (!this.embeddingModel) {
+      throw new AppError('GEMINI_RESPONSE_ERROR', 'Gemini embeddingModel is not configured', {
+        meta: {provider: 'gemini'},
+      })
+    }
+
+    const controller = new AbortController()
+    const shouldUseTimeout = this.timeoutMs > 0
+    const timeout = shouldUseTimeout
+      ? setTimeout(() => controller.abort(), this.timeoutMs)
+      : undefined
+
+    try {
+      const modelPath = toGeminiModelPath(this.embeddingModel)
+      const response = await fetch(`${this.baseUrl}/${modelPath}:batchEmbedContents`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-goog-api-key': this.apiKey,
+        },
+        body: JSON.stringify({
+          requests: request.inputs.map(input => ({
+            model: modelPath,
+            content: {
+              parts: [{text: input}],
+            },
+          })),
+        }),
+        signal: shouldUseTimeout ? controller.signal : undefined,
+      })
+
+      const rawBody = (await response.json()) as GeminiEmbeddingResponse
+
+      if (!response.ok) {
+        const detail = rawBody.error?.message ?? `HTTP ${response.status}`
+        throw new AppError('GEMINI_HTTP_ERROR', `Gemini embeddings request failed: ${detail}`, {
+          meta: {status: response.status, model: this.embeddingModel},
+        })
+      }
+
+      const embeddings = (rawBody.embeddings ?? []).flatMap(item => (Array.isArray(item.values) ? [item.values] : []))
+      if (embeddings.length !== request.inputs.length) {
+        throw new AppError('GEMINI_RESPONSE_ERROR', 'Gemini embeddings response count did not match inputs', {
+          meta: {model: this.embeddingModel, expected: request.inputs.length, actual: embeddings.length},
+        })
+      }
+
+      return {
+        embeddings,
+        model: this.embeddingModel,
+        raw: rawBody,
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new AppError(
+          'GEMINI_TIMEOUT',
+          `Gemini embeddings request timed out after ${this.timeoutMs}ms (model: ${this.embeddingModel}).`,
+          {cause: error, meta: {model: this.embeddingModel, timeoutMs: this.timeoutMs}},
+        )
+      }
+
+      if (error instanceof AppError) {
+        throw error
+      }
+
+      throw new AppError('GEMINI_NETWORK_ERROR', `Gemini embeddings network error: ${getErrorMessage(error)}`, {
+        cause: error,
+        meta: {model: this.embeddingModel, baseUrl: this.baseUrl},
       })
     } finally {
       if (timeout) {

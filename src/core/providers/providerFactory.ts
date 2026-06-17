@@ -18,6 +18,7 @@ export function createProvider(settings: ProviderSettings, options: ProviderTool
     case 'openai':
       return new OpenAIProvider({
         model: settings.model,
+        embeddingModel: settings.embeddingModel,
         baseUrl: settings.baseUrl,
         timeoutMs: settings.timeoutMs,
         tools: options.tools,
@@ -39,6 +40,7 @@ export function createProvider(settings: ProviderSettings, options: ProviderTool
     case 'gemini':
       return new GeminiProvider({
         model: settings.model,
+        embeddingModel: settings.embeddingModel,
         baseUrl: settings.baseUrl,
         timeoutMs: settings.timeoutMs,
         tools: options.tools,
@@ -46,6 +48,7 @@ export function createProvider(settings: ProviderSettings, options: ProviderTool
     case 'mistral':
       return new MistralProvider({
         model: settings.model,
+        embeddingModel: settings.embeddingModel,
         baseUrl: settings.baseUrl,
         timeoutMs: settings.timeoutMs,
         tools: options.tools,

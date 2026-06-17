@@ -45,7 +45,52 @@ test('indexStore refreshes changed files incrementally and drops deleted files',
   assert.equal(third.chunks.some(chunk => chunk.filePath === 'src/beta.ts'), false)
 
   const indexRaw = await readFile(path.join(workspace, '.daycli', 'index', 'chunks.json'), 'utf8')
-  assert.ok(indexRaw.includes('"version": 2'))
+  assert.ok(indexRaw.includes('"version": 3'))
+})
+
+test('indexStore embeds new chunks incrementally and re-embeds when the model changes', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-index-embedding-'))
+  t.after(async () => {
+    await rm(workspace, {recursive: true, force: true})
+  })
+
+  const srcDir = path.join(workspace, 'src')
+  await mkdir(srcDir, {recursive: true})
+  const alphaPath = path.join(srcDir, 'alpha.ts')
+  const betaPath = path.join(srcDir, 'beta.ts')
+  await writeFile(alphaPath, 'export function alpha() { return 1 }\n', 'utf8')
+  await writeFile(betaPath, 'export function beta() { return 2 }\n', 'utf8')
+
+  const provider = createFakeEmbeddingProvider('embed-v1')
+  const first = await loadOrBuildIndex(workspace, {
+    embeddingProvider: provider,
+    embeddingModel: 'embed-v1',
+  })
+
+  assert.equal(provider.callInputs.length, 2)
+  assert.ok(first.chunks.every(chunk => chunk.embedding?.model === 'embed-v1'))
+
+  await loadOrBuildIndex(workspace, {
+    embeddingProvider: provider,
+    embeddingModel: 'embed-v1',
+  })
+  assert.equal(provider.callInputs.length, 2)
+
+  await sleep(20)
+  await writeFile(alphaPath, 'export function alpha() { return 100 }\n', 'utf8')
+  await loadOrBuildIndex(workspace, {
+    embeddingProvider: provider,
+    embeddingModel: 'embed-v1',
+  })
+  assert.equal(provider.callInputs.length, 3)
+
+  const nextProvider = createFakeEmbeddingProvider('embed-v2')
+  const modelChanged = await loadOrBuildIndex(workspace, {
+    embeddingProvider: nextProvider,
+    embeddingModel: 'embed-v2',
+  })
+  assert.equal(nextProvider.callInputs.length, 2)
+  assert.ok(modelChanged.chunks.every(chunk => chunk.embedding?.model === 'embed-v2'))
 })
 
 function getChunkUpdatedAt(index: Awaited<ReturnType<typeof loadOrBuildIndex>>, filePath: string): number {
@@ -56,4 +101,20 @@ function getChunkUpdatedAt(index: Awaited<ReturnType<typeof loadOrBuildIndex>>, 
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function createFakeEmbeddingProvider(model: string): {
+  callInputs: string[]
+  embed(input: {inputs: string[]}): Promise<{embeddings: number[][]; model: string}>
+} {
+  return {
+    callInputs: [],
+    async embed(input: {inputs: string[]}): Promise<{embeddings: number[][]; model: string}> {
+      this.callInputs.push(...input.inputs)
+      return {
+        model,
+        embeddings: input.inputs.map((text, index) => [index + 1, text.length]),
+      }
+    },
+  }
 }

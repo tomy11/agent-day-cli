@@ -1,4 +1,4 @@
-import type {ChatRequest, ChatResponse, LlmProvider} from '../types'
+import type {ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, LlmProvider} from '../types'
 import type {ToolDefinition} from '../../tools'
 import {AppError} from '../../errors'
 import {formatNativeToolCallResponse, parseToolArguments} from '../nativeToolCalls'
@@ -8,6 +8,7 @@ interface MistralProviderOptions {
   apiKey?: string
   baseUrl?: string
   model: string
+  embeddingModel?: string
   timeoutMs?: number
   tools?: ToolDefinition[]
 }
@@ -32,10 +33,22 @@ interface MistralChatResponse {
   }>
 }
 
+interface MistralEmbeddingResponse {
+  error?: {
+    message?: string
+  }
+  model?: string
+  data?: Array<{
+    index?: number
+    embedding?: number[]
+  }>
+}
+
 export class MistralProvider implements LlmProvider {
   private readonly apiKey: string
   private readonly baseUrl: string
   private readonly model: string
+  private readonly embeddingModel?: string
   private readonly timeoutMs: number
   private readonly tools: ToolDefinition[]
 
@@ -43,6 +56,7 @@ export class MistralProvider implements LlmProvider {
     this.apiKey = options.apiKey ?? process.env.MISTRAL_API_KEY ?? ''
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? 'https://api.mistral.ai/v1')
     this.model = options.model
+    this.embeddingModel = options.embeddingModel
     this.timeoutMs = options.timeoutMs ?? 60_000
     this.tools = options.tools ?? []
 
@@ -143,6 +157,79 @@ export class MistralProvider implements LlmProvider {
       }
     }
   }
+
+  public async embed(request: EmbeddingRequest): Promise<EmbeddingResponse> {
+    if (!this.embeddingModel) {
+      throw new AppError('MISTRAL_RESPONSE_ERROR', 'Mistral embeddingModel is not configured', {
+        meta: {provider: 'mistral'},
+      })
+    }
+
+    const controller = new AbortController()
+    const shouldUseTimeout = this.timeoutMs > 0
+    const timeout = shouldUseTimeout
+      ? setTimeout(() => controller.abort(), this.timeoutMs)
+      : undefined
+
+    try {
+      const response = await fetch(`${this.baseUrl}/embeddings`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${this.apiKey}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.embeddingModel,
+          input: request.inputs,
+          encoding_format: 'float',
+        }),
+        signal: shouldUseTimeout ? controller.signal : undefined,
+      })
+
+      const rawBody = (await response.json()) as MistralEmbeddingResponse
+
+      if (!response.ok) {
+        const detail = rawBody.error?.message ?? `HTTP ${response.status}`
+        throw new AppError('MISTRAL_HTTP_ERROR', `Mistral embeddings request failed: ${detail}`, {
+          meta: {status: response.status, model: this.embeddingModel},
+        })
+      }
+
+      const embeddings = normalizeIndexedEmbeddings(rawBody.data)
+      if (embeddings.length !== request.inputs.length) {
+        throw new AppError('MISTRAL_RESPONSE_ERROR', 'Mistral embeddings response count did not match inputs', {
+          meta: {model: this.embeddingModel, expected: request.inputs.length, actual: embeddings.length},
+        })
+      }
+
+      return {
+        embeddings,
+        model: rawBody.model ?? this.embeddingModel,
+        raw: rawBody,
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new AppError(
+          'MISTRAL_TIMEOUT',
+          `Mistral embeddings request timed out after ${this.timeoutMs}ms (model: ${this.embeddingModel}).`,
+          {cause: error, meta: {model: this.embeddingModel, timeoutMs: this.timeoutMs}},
+        )
+      }
+
+      if (error instanceof AppError) {
+        throw error
+      }
+
+      throw new AppError('MISTRAL_NETWORK_ERROR', `Mistral embeddings network error: ${getErrorMessage(error)}`, {
+        cause: error,
+        meta: {model: this.embeddingModel, baseUrl: this.baseUrl},
+      })
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout)
+      }
+    }
+  }
 }
 
 function toMistralTool(tool: ToolDefinition): Record<string, unknown> {
@@ -162,4 +249,11 @@ function normalizeBaseUrl(baseUrl: string): string {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function normalizeIndexedEmbeddings(data: MistralEmbeddingResponse['data']): number[][] {
+  return (data ?? [])
+    .slice()
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    .flatMap(item => (Array.isArray(item.embedding) ? [item.embedding] : []))
 }

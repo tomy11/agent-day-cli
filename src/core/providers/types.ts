@@ -19,8 +19,19 @@ export interface ChatResponse {
   raw?: unknown
 }
 
+export interface EmbeddingRequest {
+  inputs: string[]
+}
+
+export interface EmbeddingResponse {
+  embeddings: number[][]
+  model: string
+  raw?: unknown
+}
+
 export interface LlmProvider {
   chat(request: ChatRequest): Promise<ChatResponse>
+  embed?(request: EmbeddingRequest): Promise<EmbeddingResponse>
 }
 
 export const PROVIDER_TYPES = ['ollama', 'openai', 'anthropic', 'openrouter', 'gemini', 'mistral'] as const
@@ -30,6 +41,7 @@ export type ProviderType = (typeof PROVIDER_TYPES)[number]
 export interface ProviderSettings {
   type: ProviderType
   model: string
+  embeddingModel?: string
   baseUrl: string
   timeoutMs: number
 }
