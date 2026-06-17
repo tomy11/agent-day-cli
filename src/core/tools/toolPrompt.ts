@@ -8,6 +8,21 @@ export function buildToolSystemPrompt(tools: ToolDefinition[]): string {
           '- `read_file` (low risk): read a workspace file.',
           '  Input: `{ "path": "README.md", "maxChars": 20000 }`',
         ].join('\n')
+      case 'search_files':
+        return [
+          '- `search_files` (low risk): search literal text in workspace files.',
+          '  Input: `{ "query": "ToolRouter", "path": "src", "caseSensitive": false, "maxResults": 50, "maxFileBytes": 512000 }`',
+        ].join('\n')
+      case 'find_files':
+        return [
+          '- `find_files` (low risk): find workspace file paths by literal path or basename query.',
+          '  Input: `{ "query": "tool", "path": "src", "caseSensitive": false, "maxResults": 100 }`',
+        ].join('\n')
+      case 'list_dir':
+        return [
+          '- `list_dir` (low risk): list entries in a workspace directory.',
+          '  Input: `{ "path": "src/core", "recursive": false, "maxEntries": 200 }`',
+        ].join('\n')
       case 'write_file':
         return [
           '- `write_file` (high risk, approval required): create or replace a workspace file.',

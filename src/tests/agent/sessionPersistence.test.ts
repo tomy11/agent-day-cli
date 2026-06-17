@@ -128,6 +128,65 @@ test('persistAgentToolResults stores mutation tool result metadata for audit', a
   })
 })
 
+test('persistAgentToolResults stores navigation tool result metadata for audit', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-agent-session-'))
+  t.after(async () => {
+    await rm(workspace, {recursive: true, force: true})
+  })
+
+  const sessionStore = new SessionStore(workspace)
+  const session = await sessionStore.create({
+    kind: 'run',
+    title: 'Navigation tool run',
+    workspaceRoot: workspace,
+  })
+
+  await persistAgentToolResults({
+    sessionStore,
+    sessionId: session.id,
+    result: createNavigationAgentResult(workspace),
+  })
+
+  const loaded = await sessionStore.get(session.id)
+  assert.equal(loaded.messages.length, 3)
+  assert.deepEqual(loaded.messages.map(message => message.toolName), [
+    'search_files',
+    'find_files',
+    'list_dir',
+  ])
+  assert.deepEqual(loaded.messages[0]?.metadata?.toolResult, {
+    ok: true,
+    query: 'ToolRouter',
+    path: 'src',
+    absolutePath: path.join(workspace, 'src'),
+    matchCount: 2,
+    totalMatches: 2,
+    filesSearched: 3,
+    filesSkipped: 1,
+    truncated: false,
+    paths: ['src/core/tools/toolRouter.ts'],
+  })
+  assert.deepEqual(loaded.messages[1]?.metadata?.toolResult, {
+    ok: true,
+    query: 'tool',
+    path: 'src',
+    absolutePath: path.join(workspace, 'src'),
+    pathCount: 2,
+    totalMatches: 2,
+    truncated: false,
+    paths: ['src/core/tools/toolRouter.ts', 'src/core/tools/toolPrompt.ts'],
+  })
+  assert.deepEqual(loaded.messages[2]?.metadata?.toolResult, {
+    ok: true,
+    path: 'src/core',
+    absolutePath: path.join(workspace, 'src', 'core'),
+    entryCount: 2,
+    totalEntries: 2,
+    truncated: false,
+    paths: ['src/core/tools', 'src/core/agent'],
+  })
+})
+
 test('persistAgentToolResults stores recoverable tool error metadata', async t => {
   const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-agent-session-'))
   t.after(async () => {
@@ -281,6 +340,87 @@ function createMutationAgentResult(workspace: string): AgentResult {
         args: ['-e', 'console.log("ok")'],
       },
       output: runOutput,
+    },
+  ])
+}
+
+function createNavigationAgentResult(workspace: string): AgentResult {
+  const searchOutput = {
+    query: 'ToolRouter',
+    path: 'src',
+    absolutePath: path.join(workspace, 'src'),
+    matches: [
+      {
+        path: 'src/core/tools/toolRouter.ts',
+        line: 1,
+        column: 14,
+        preview: 'export class ToolRouter',
+      },
+      {
+        path: 'src/core/tools/toolRouter.ts',
+        line: 4,
+        column: 7,
+        preview: 'const router = new ToolRouter()',
+      },
+    ],
+    totalMatches: 2,
+    filesSearched: 3,
+    filesSkipped: 1,
+    truncated: false,
+  }
+  const findOutput = {
+    query: 'tool',
+    path: 'src',
+    absolutePath: path.join(workspace, 'src'),
+    paths: ['src/core/tools/toolRouter.ts', 'src/core/tools/toolPrompt.ts'],
+    totalMatches: 2,
+    truncated: false,
+  }
+  const listOutput = {
+    path: 'src/core',
+    absolutePath: path.join(workspace, 'src', 'core'),
+    entries: [
+      {
+        path: 'src/core/tools',
+        name: 'tools',
+        type: 'directory',
+      },
+      {
+        path: 'src/core/agent',
+        name: 'agent',
+        type: 'directory',
+      },
+    ],
+    totalEntries: 2,
+    truncated: false,
+  }
+
+  return createToolResultOnlyAgentResult([
+    {
+      id: 'call-search',
+      toolName: 'search_files',
+      input: {
+        query: 'ToolRouter',
+        path: 'src',
+      },
+      output: searchOutput,
+    },
+    {
+      id: 'call-find',
+      toolName: 'find_files',
+      input: {
+        query: 'tool',
+        path: 'src',
+      },
+      output: findOutput,
+    },
+    {
+      id: 'call-list',
+      toolName: 'list_dir',
+      input: {
+        path: 'src/core',
+      },
+      output: listOutput,
     },
   ])
 }

@@ -11,11 +11,17 @@ import {
 
 test('default safety policy assigns risk levels and path access for tool families', () => {
   assert.equal(resolveToolRiskLevel('read_file', 'high'), 'low')
+  assert.equal(resolveToolRiskLevel('search_files', 'high'), 'low')
+  assert.equal(resolveToolRiskLevel('find_files', 'high'), 'low')
+  assert.equal(resolveToolRiskLevel('list_dir', 'high'), 'low')
   assert.equal(resolveToolRiskLevel('write_file', 'low'), 'high')
   assert.equal(resolveToolRiskLevel('edit_file', 'low'), 'high')
   assert.equal(resolveToolRiskLevel('run_command', 'low'), 'high')
 
   assert.equal(resolveToolPathAccess('read_file'), 'read')
+  assert.equal(resolveToolPathAccess('search_files'), 'read')
+  assert.equal(resolveToolPathAccess('find_files'), 'read')
+  assert.equal(resolveToolPathAccess('list_dir'), 'read')
   assert.equal(resolveToolPathAccess('write_file'), 'write')
   assert.equal(resolveToolPathAccess('edit_file'), 'write')
   assert.equal(resolveToolPathAccess('run_command'), 'execute')

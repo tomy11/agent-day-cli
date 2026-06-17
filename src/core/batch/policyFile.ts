@@ -129,6 +129,9 @@ export const EXAMPLE_BATCH_POLICY: BatchPolicyFile = {
     },
     tools: {
       read_file: 'allow',
+      search_files: 'allow',
+      find_files: 'allow',
+      list_dir: 'allow',
       write_file: 'deny',
       edit_file: 'deny',
       run_command: 'allow',

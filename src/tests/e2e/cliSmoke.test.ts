@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import {tmpdir} from 'node:os'
-import {mkdtemp, readFile, readdir, rm, writeFile} from 'node:fs/promises'
+import {mkdir, mkdtemp, readFile, readdir, rm, writeFile} from 'node:fs/promises'
 import {spawn, spawnSync} from 'node:child_process'
 import {createServer, type Server} from 'node:http'
 
@@ -299,6 +299,18 @@ test('run command routes model-requested read_file tool calls through the agent 
   assert.equal(requests.length, 2)
   assert.match(
     requests[0]?.messages?.find(message => message.role === 'system')?.content ?? '',
+    /`search_files`/,
+  )
+  assert.match(
+    requests[0]?.messages?.find(message => message.role === 'system')?.content ?? '',
+    /`find_files`/,
+  )
+  assert.match(
+    requests[0]?.messages?.find(message => message.role === 'system')?.content ?? '',
+    /`list_dir`/,
+  )
+  assert.match(
+    requests[0]?.messages?.find(message => message.role === 'system')?.content ?? '',
     /`write_file`/,
   )
   assert.match(
@@ -341,6 +353,64 @@ test('run command routes model-requested read_file tool calls through the agent 
   assert.equal(assistantMessage?.metadata?.agent?.stoppedReason, 'final_answer')
   assert.equal(assistantMessage?.metadata?.agent?.toolResultCount, 1)
   assert.equal(assistantMessage?.metadata?.agent?.stepCount, 5)
+})
+
+test('run command routes model-requested search_files tool calls through the agent loop', async t => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'daycli-run-search-tool-'))
+  await mkdir(path.join(workspace, 'src'), {recursive: true})
+  await writeFile(path.join(workspace, 'src', 'index.ts'), 'export const searchNeedle = true\n', 'utf8')
+
+  const requests: MockChatRequest[] = []
+  const server = createToolLoopServer({
+    requests,
+    firstContent: JSON.stringify({
+      content: 'Searching for the symbol.',
+      toolCalls: [
+        {
+          id: 'call-search',
+          name: 'search_files',
+          input: {
+            query: 'searchNeedle',
+            path: 'src',
+            maxResults: 5,
+          },
+        },
+      ],
+    }),
+    finalContent: 'The symbol appears in src/index.ts.',
+  })
+
+  await listen(server)
+
+  t.after(async () => {
+    await close(server)
+    await rm(workspace, {recursive: true, force: true})
+  })
+
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+
+  const runResult = await runCliAsync(
+    createMockRunArgs('Find searchNeedle', address.port),
+    workspace,
+  )
+
+  assert.equal(runResult.status, 0)
+  assert.match(runResult.stdout, /The symbol appears in src\/index\.ts\./)
+  assert.match(requests[1]?.messages?.at(-1)?.content ?? '', /Tool result from search_files \(call-search\):/)
+  assert.match(requests[1]?.messages?.at(-1)?.content ?? '', /src\/index\.ts/)
+
+  const toolMessage = await readOnlyToolMessage(workspace, 'search_files')
+  const toolResult = toolMessage?.metadata?.toolResult as {
+    ok?: boolean
+    query?: string
+    matchCount?: number
+    paths?: string[]
+  } | undefined
+  assert.equal(toolResult?.ok, true)
+  assert.equal(toolResult?.query, 'searchNeedle')
+  assert.equal(toolResult?.matchCount, 1)
+  assert.deepEqual(toolResult?.paths, ['src/index.ts'])
 })
 
 test('run command executes approved write_file tool and persists metadata', async t => {

@@ -21,7 +21,8 @@ Safe Executor --> Safety Policy --> Path Guard --> Approval Manager
   |                                       |
   v                                       |
 Tool Implementations                       |
-(read_file, write_file, edit_file,         |
+(read_file, search_files, find_files,      |
+ list_dir, write_file, edit_file,          |
  run_command)                             |
   |                                       |
   +-------------------- result ---------->+
@@ -117,8 +118,8 @@ Stop conditions:
 
 Each loop step emits an `AgentEvent` (`model_response`, `tool_call`, `tool_result`, `final_answer`, `stopped`) for UI rendering and structured logs. Completed runs persist assistant messages plus agent metadata, and tool result steps are persisted as session messages with role `tool`.
 
-## Safe Mutation And Command Execution
-M9 adds first-class mutation and command tools to the default tool router. The model can request these tools only through the strict JSON tool-call contract included in the system prompt:
+## Built-in Tool Execution
+M9 adds first-class mutation and command tools to the default tool router. M11 adds read-only search and navigation tools for repository exploration. The model can request these tools only through the strict JSON tool-call contract included in the system prompt:
 
 ```json
 {
@@ -136,6 +137,9 @@ M9 adds first-class mutation and command tools to the default tool router. The m
 Available built-in tools:
 
 - `read_file`: low-risk workspace read. Input is a workspace-relative `path`.
+- `search_files`: low-risk workspace text search. Input includes `query`, optional workspace-relative `path`, optional case sensitivity, match limits, and file-size limits.
+- `find_files`: low-risk workspace file lookup. Input includes `query`, optional workspace-relative `path`, optional case sensitivity, and result limits.
+- `list_dir`: low-risk workspace directory listing. Input includes optional workspace-relative `path`, optional recursion, and entry limits.
 - `write_file`: high-risk workspace write. Input includes `path`, `content`, optional `createDirs`, and optional `overwrite`. Existing files are rejected unless `overwrite` is explicitly true.
 - `edit_file`: high-risk patch-style edit. Input includes `path` and ordered `edits` with exact `oldText` / `newText` replacements. Missing matches, ambiguous matches, and unchanged edits return structured conflicts unless the request explicitly allows `replaceAll` or relaxed exact matching.
 - `run_command`: high-risk command execution. Input includes `command`, optional `args`, optional workspace-relative `cwd`, optional `timeoutMs`, and optional output limit. Commands run with `shell: false`, capture stdout/stderr, and report exit code, timeout state, and duration.
@@ -145,6 +149,7 @@ Available built-in tools:
 
 - All file paths must resolve inside the active workspace.
 - Reads are allowed for workspace paths by default.
+- Read-only search and navigation tools enforce bounded output using match, entry, and file-size limits.
 - Writes are allowed only inside the workspace and deny protected paths such as `.git/**`, `node_modules/**`, and `dist/**`.
 - Command `cwd` must resolve inside the workspace and denies protected paths such as `.git/**` and `node_modules/**`.
 - Dangerous command names such as `rm`, `rmdir`, `sudo`, `su`, `chmod`, `chown`, `mkfs`, `mount`, `umount`, `dd`, `shutdown`, and `reboot` are blocked before approval.
@@ -153,8 +158,11 @@ Available built-in tools:
 Rejected approvals, blocked paths, denied commands, edit conflicts, command failures, and timeouts are returned as structured tool results so the agent loop can recover or explain the failure instead of crashing the whole run.
 
 ### Session Audit Metadata
-Tool results are persisted as session messages with role `tool`. Mutation and command tools also include compact audit metadata in `metadata.toolResult`:
+Tool results are persisted as session messages with role `tool`. Tools also include compact audit metadata in `metadata.toolResult`:
 
+- `search_files`: `query`, `path`, `absolutePath`, `matchCount`, `totalMatches`, `filesSearched`, `filesSkipped`, `truncated`, `paths`
+- `find_files`: `query`, `path`, `absolutePath`, `pathCount`, `totalMatches`, `truncated`, `paths`
+- `list_dir`: `path`, `absolutePath`, `entryCount`, `totalEntries`, `truncated`, `paths`
 - `write_file`: `path`, `absolutePath`, `bytesWritten`, `created`, `overwritten`
 - `edit_file`: `path`, `absolutePath`, `replacementsApplied`, `changed`
 - `run_command`: `command`, `args`, `cwd`, `exitCode`, `timedOut`, `durationMs`, `stdoutBytes`, `stderrBytes`

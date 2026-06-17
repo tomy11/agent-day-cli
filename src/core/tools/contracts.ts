@@ -1,6 +1,12 @@
 import type {ToolRiskLevel} from './types'
 
-export type ToolContractName = 'write_file' | 'edit_file' | 'run_command'
+export type ToolContractName =
+  | 'search_files'
+  | 'find_files'
+  | 'list_dir'
+  | 'write_file'
+  | 'edit_file'
+  | 'run_command'
 
 export type JsonPrimitiveType = 'string' | 'number' | 'boolean' | 'object' | 'array'
 
@@ -77,6 +83,290 @@ export interface RunCommandToolOutput {
   stderr: string
   timedOut: boolean
   durationMs: number
+}
+
+export interface SearchFilesToolInput {
+  query: string
+  path?: string
+  caseSensitive?: boolean
+  maxResults?: number
+  maxFileBytes?: number
+}
+
+export interface SearchFilesMatch {
+  path: string
+  line: number
+  column: number
+  preview: string
+}
+
+export interface SearchFilesToolOutput {
+  query: string
+  path: string
+  absolutePath: string
+  matches: SearchFilesMatch[]
+  totalMatches: number
+  filesSearched: number
+  filesSkipped: number
+  truncated: boolean
+}
+
+export interface FindFilesToolInput {
+  query: string
+  path?: string
+  caseSensitive?: boolean
+  maxResults?: number
+}
+
+export interface FindFilesToolOutput {
+  query: string
+  path: string
+  absolutePath: string
+  paths: string[]
+  totalMatches: number
+  truncated: boolean
+}
+
+export interface ListDirToolInput {
+  path?: string
+  recursive?: boolean
+  maxEntries?: number
+}
+
+export interface ListDirEntry {
+  path: string
+  name: string
+  type: 'file' | 'directory' | 'symlink' | 'other'
+  size?: number
+  modifiedAt?: string
+}
+
+export interface ListDirToolOutput {
+  path: string
+  absolutePath: string
+  entries: ListDirEntry[]
+  totalEntries: number
+  truncated: boolean
+}
+
+export const SEARCH_FILES_TOOL_CONTRACT: ToolContract = {
+  name: 'search_files',
+  description: 'Search text content in files under a workspace path.',
+  riskLevel: 'low',
+  inputSchema: {
+    type: 'object',
+    description: 'Payload for workspace text search.',
+    required: ['query'],
+    properties: {
+      query: {
+        type: 'string',
+        description: 'Literal text to search for.',
+      },
+      path: {
+        type: 'string',
+        description: 'Workspace-relative file or directory to search.',
+        default: '.',
+      },
+      caseSensitive: {
+        type: 'boolean',
+        description: 'Whether matching should preserve case.',
+        default: false,
+      },
+      maxResults: {
+        type: 'number',
+        description: 'Maximum match objects returned.',
+        default: 50,
+      },
+      maxFileBytes: {
+        type: 'number',
+        description: 'Maximum file size to read during search.',
+        default: 512000,
+      },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    description: 'Bounded search result metadata and matches.',
+    required: ['query', 'path', 'absolutePath', 'matches', 'totalMatches', 'filesSearched', 'filesSkipped', 'truncated'],
+    properties: {
+      query: {
+        type: 'string',
+        description: 'Search query.',
+      },
+      path: {
+        type: 'string',
+        description: 'Original searched path.',
+      },
+      absolutePath: {
+        type: 'string',
+        description: 'Resolved searched path inside the workspace.',
+      },
+      matches: {
+        type: 'array',
+        description: 'Returned matches.',
+        items: {
+          type: 'object',
+          description: 'One text match.',
+        },
+      },
+      totalMatches: {
+        type: 'number',
+        description: 'Number of matches observed before any output limit stopped the search.',
+      },
+      filesSearched: {
+        type: 'number',
+        description: 'Number of files read.',
+      },
+      filesSkipped: {
+        type: 'number',
+        description: 'Number of files skipped due to type, size, or read failure.',
+      },
+      truncated: {
+        type: 'boolean',
+        description: 'Whether the result limit was reached.',
+      },
+    },
+  },
+  safetyNotes: [
+    'Must pass workspace path guard before searching.',
+    'Read-only and low risk.',
+    'Must enforce match and file-size limits to keep tool output bounded.',
+  ],
+}
+
+export const FIND_FILES_TOOL_CONTRACT: ToolContract = {
+  name: 'find_files',
+  description: 'Find file paths under a workspace path by literal name or path query.',
+  riskLevel: 'low',
+  inputSchema: {
+    type: 'object',
+    description: 'Payload for workspace file lookup.',
+    required: ['query'],
+    properties: {
+      query: {
+        type: 'string',
+        description: 'Literal text matched against workspace-relative paths and basenames.',
+      },
+      path: {
+        type: 'string',
+        description: 'Workspace-relative directory to scan.',
+        default: '.',
+      },
+      caseSensitive: {
+        type: 'boolean',
+        description: 'Whether matching should preserve case.',
+        default: false,
+      },
+      maxResults: {
+        type: 'number',
+        description: 'Maximum path results returned.',
+        default: 100,
+      },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    description: 'Bounded file lookup result.',
+    required: ['query', 'path', 'absolutePath', 'paths', 'totalMatches', 'truncated'],
+    properties: {
+      query: {
+        type: 'string',
+        description: 'File query.',
+      },
+      path: {
+        type: 'string',
+        description: 'Original searched path.',
+      },
+      absolutePath: {
+        type: 'string',
+        description: 'Resolved search root inside the workspace.',
+      },
+      paths: {
+        type: 'array',
+        description: 'Workspace-relative matching file paths.',
+        items: {
+          type: 'string',
+          description: 'One workspace-relative path.',
+        },
+      },
+      totalMatches: {
+        type: 'number',
+        description: 'Number of path matches observed before any output limit stopped the scan.',
+      },
+      truncated: {
+        type: 'boolean',
+        description: 'Whether the result limit was reached.',
+      },
+    },
+  },
+  safetyNotes: [
+    'Must pass workspace path guard before scanning.',
+    'Read-only and low risk.',
+    'Must enforce path result limits to keep tool output bounded.',
+  ],
+}
+
+export const LIST_DIR_TOOL_CONTRACT: ToolContract = {
+  name: 'list_dir',
+  description: 'List entries in a workspace directory.',
+  riskLevel: 'low',
+  inputSchema: {
+    type: 'object',
+    description: 'Payload for directory listing.',
+    properties: {
+      path: {
+        type: 'string',
+        description: 'Workspace-relative directory to list.',
+        default: '.',
+      },
+      recursive: {
+        type: 'boolean',
+        description: 'Whether to list nested entries.',
+        default: false,
+      },
+      maxEntries: {
+        type: 'number',
+        description: 'Maximum directory entries returned.',
+        default: 200,
+      },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    description: 'Bounded directory listing result.',
+    required: ['path', 'absolutePath', 'entries', 'totalEntries', 'truncated'],
+    properties: {
+      path: {
+        type: 'string',
+        description: 'Original listed path.',
+      },
+      absolutePath: {
+        type: 'string',
+        description: 'Resolved listed path inside the workspace.',
+      },
+      entries: {
+        type: 'array',
+        description: 'Directory entries.',
+        items: {
+          type: 'object',
+          description: 'One directory entry.',
+        },
+      },
+      totalEntries: {
+        type: 'number',
+        description: 'Number of entries observed before any output limit stopped the listing.',
+      },
+      truncated: {
+        type: 'boolean',
+        description: 'Whether the entry limit was reached.',
+      },
+    },
+  },
+  safetyNotes: [
+    'Must pass workspace path guard before listing.',
+    'Read-only and low risk.',
+    'Must enforce entry limits to keep tool output bounded.',
+  ],
 }
 
 export const WRITE_FILE_TOOL_CONTRACT: ToolContract = {
@@ -321,4 +611,10 @@ export const MUTATION_TOOL_CONTRACTS = [
   WRITE_FILE_TOOL_CONTRACT,
   EDIT_FILE_TOOL_CONTRACT,
   RUN_COMMAND_TOOL_CONTRACT,
+] as const
+
+export const NAVIGATION_TOOL_CONTRACTS = [
+  SEARCH_FILES_TOOL_CONTRACT,
+  FIND_FILES_TOOL_CONTRACT,
+  LIST_DIR_TOOL_CONTRACT,
 ] as const

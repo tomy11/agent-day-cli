@@ -69,6 +69,29 @@
 - [x] M10 (Batch mode + policy file + CI-friendly output): add CI-friendly output modes such as plain, JSON, and exit codes
 - [x] M10 (Batch mode + policy file + CI-friendly output): add batch execution tests for success, policy denial, tool failure, and deterministic output
 - [x] M10 (Batch mode + policy file + CI-friendly output): update docs with CI examples and recommended safe defaults
+- [x] M11 (Search & navigation tools): define tool contracts for `search_files`, `find_files`, and `list_dir`
+- [x] M11 (Search & navigation tools): implement read-only builtin tools through the workspace path guard with output-size limits
+- [x] M11 (Search & navigation tools): add `read` path-access rules for the new tools in `safetyPolicy.ts`
+- [x] M11 (Search & navigation tools): register tools in the default tool router and expose them in `toolPrompt.ts`
+- [x] M11 (Search & navigation tools): persist compact audit fields (match counts, paths) for the new tool results in sessions
+- [x] M11 (Search & navigation tools): add unit tests for match, no-match, denied-path, and output-limit cases plus one E2E
+- [x] M11 (Search & navigation tools): update `ARCHITECTURE.md` and the README tools table
+- [ ] M12 (Multi-provider support): add `provider.type` and per-provider config to `daycliConfig.ts` with Ollama as the backward-compatible default
+- [ ] M12 (Multi-provider support): build a provider factory/registry in `src/core/providers`
+- [ ] M12 (Multi-provider support): extract JSON tool-call parsing out of `OllamaProvider` into a shared module
+- [ ] M12 (Multi-provider support): implement an OpenAI-compatible provider with native tool-calling
+- [ ] M12 (Multi-provider support): implement an Anthropic provider
+- [ ] M12 (Multi-provider support): load API keys from environment variables and keep them out of committed config/sessions
+- [ ] M12 (Multi-provider support): support `daycli config set provider.type` with validation and clear error codes
+- [ ] M12 (Multi-provider support): add unit tests per provider, factory selection, and parsing fallback
+- [ ] M12 (Multi-provider support): update docs with per-provider setup and tool-calling differences
+- [ ] M13 (Embedding-based retrieval): add an embeddings endpoint to the provider abstraction (depends on M12)
+- [ ] M13 (Embedding-based retrieval): extend `CodeChunk` and IndexStore to persist embedding vectors with incremental re-embedding
+- [ ] M13 (Embedding-based retrieval): implement cosine vector search in the Retriever
+- [ ] M13 (Embedding-based retrieval): add hybrid ranking that combines vector and existing TF-IDF scores with a configurable weight
+- [ ] M13 (Embedding-based retrieval): add graceful fallback to keyword retrieval when no embeddings provider is available
+- [ ] M13 (Embedding-based retrieval): add tests for vector recall, hybrid scoring, incremental re-embed, and fallback
+- [ ] M13 (Embedding-based retrieval): update docs with embedding model setup and hybrid retrieval explanation
 
 ## In Progress
 - [ ] (none)
@@ -89,3 +112,6 @@
 - M8: Agent loop + real tool calling
 - M9: Safe write/edit/run-command tools
 - M10: Batch mode + policy file + CI-friendly output
+- M11: Search & navigation tools
+- M12: Multi-provider support
+- M13: Embedding-based retrieval

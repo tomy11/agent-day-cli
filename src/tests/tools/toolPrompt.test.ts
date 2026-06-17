@@ -7,6 +7,9 @@ test('buildToolSystemPrompt exposes default tools and safety rules', () => {
   const prompt = buildToolSystemPrompt(router.list())
 
   assert.match(prompt, /`read_file`/)
+  assert.match(prompt, /`search_files`/)
+  assert.match(prompt, /`find_files`/)
+  assert.match(prompt, /`list_dir`/)
   assert.match(prompt, /`write_file`/)
   assert.match(prompt, /`edit_file`/)
   assert.match(prompt, /`run_command`/)

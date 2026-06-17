@@ -59,6 +59,18 @@ export const DEFAULT_SAFETY_POLICY: SafetyPolicy = {
       riskLevel: 'low',
       pathAccess: 'read',
     },
+    search_files: {
+      riskLevel: 'low',
+      pathAccess: 'read',
+    },
+    find_files: {
+      riskLevel: 'low',
+      pathAccess: 'read',
+    },
+    list_dir: {
+      riskLevel: 'low',
+      pathAccess: 'read',
+    },
     write_file: {
       riskLevel: 'high',
       pathAccess: 'write',

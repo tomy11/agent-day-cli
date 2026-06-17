@@ -97,6 +97,40 @@ function summarizeToolResult(toolName: string, output: unknown): Record<string, 
   const payload = output as Record<string, unknown>
 
   switch (toolName) {
+    case 'search_files':
+      return pickDefined({
+        ok: true,
+        query: payload.query,
+        path: payload.path,
+        absolutePath: payload.absolutePath,
+        matchCount: Array.isArray(payload.matches) ? payload.matches.length : undefined,
+        totalMatches: payload.totalMatches,
+        filesSearched: payload.filesSearched,
+        filesSkipped: payload.filesSkipped,
+        truncated: payload.truncated,
+        paths: uniquePathsFromMatches(payload.matches),
+      })
+    case 'find_files':
+      return pickDefined({
+        ok: true,
+        query: payload.query,
+        path: payload.path,
+        absolutePath: payload.absolutePath,
+        pathCount: Array.isArray(payload.paths) ? payload.paths.length : undefined,
+        totalMatches: payload.totalMatches,
+        truncated: payload.truncated,
+        paths: limitedStringArray(payload.paths),
+      })
+    case 'list_dir':
+      return pickDefined({
+        ok: true,
+        path: payload.path,
+        absolutePath: payload.absolutePath,
+        entryCount: Array.isArray(payload.entries) ? payload.entries.length : undefined,
+        totalEntries: payload.totalEntries,
+        truncated: payload.truncated,
+        paths: uniquePathsFromEntries(payload.entries),
+      })
     case 'write_file':
       return pickDefined({
         ok: true,
@@ -149,4 +183,41 @@ function pickDefined(input: Record<string, unknown>): Record<string, unknown> {
 
 function byteLength(value: unknown): number | undefined {
   return typeof value === 'string' ? Buffer.byteLength(value, 'utf8') : undefined
+}
+
+function uniquePathsFromMatches(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  return limitedStringArray(value.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return undefined
+    }
+
+    return (item as {path?: unknown}).path
+  }))
+}
+
+function uniquePathsFromEntries(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  return limitedStringArray(value.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return undefined
+    }
+
+    return (item as {path?: unknown}).path
+  }))
+}
+
+function limitedStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const paths = value.filter((item): item is string => typeof item === 'string')
+  return [...new Set(paths)].slice(0, 20)
 }

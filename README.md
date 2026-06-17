@@ -136,20 +136,27 @@ Example:
 - Workspace path access is guarded by `WorkspacePathGuard`
 - High-risk tools require explicit approval
 
-## Safe Mutation And Command Tools
+## Built-in Tools
 
 The agent can request built-in tools through the default tool router:
 
-- `read_file` reads workspace files.
-- `write_file` creates or overwrites workspace files after approval.
-- `edit_file` applies exact patch-style text replacements after approval.
-- `run_command` runs a command with `shell: false`, a guarded workspace `cwd`, timeout handling, and captured output.
+| Tool | Risk | Purpose |
+|------|------|---------|
+| `read_file` | low | Read one workspace file with a character limit. |
+| `search_files` | low | Search literal text in workspace files with match and file-size limits. |
+| `find_files` | low | Find workspace file paths by literal path or basename query. |
+| `list_dir` | low | List directory entries with optional recursion and entry limits. |
+| `write_file` | high | Create or overwrite workspace files after approval. |
+| `edit_file` | high | Apply exact patch-style text replacements after approval. |
+| `run_command` | high | Run a command with `shell: false`, guarded `cwd`, timeout handling, and captured output. |
 
-Mutation and command tools are safe-by-default. Paths must stay inside the current workspace, protected directories such as `.git`, `node_modules`, and `dist` are blocked for writes, and dangerous commands such as `rm`, `sudo`, `chmod`, `dd`, `shutdown`, and `reboot` are denied before approval. High-risk tool calls ask for confirmation in interactive use.
+All tools are safe-by-default. Paths must stay inside the current workspace, read/navigation tools enforce output limits, protected directories such as `.git`, `node_modules`, and `dist` are blocked for writes, and dangerous commands such as `rm`, `sudo`, `chmod`, `dd`, `shutdown`, and `reboot` are denied before approval. High-risk tool calls ask for confirmation in interactive use.
 
 Examples:
 
 ```bash
+./bin/run.js run "Find where ToolRouter is defined"
+./bin/run.js run "List the files under src/core/tools"
 ./bin/run.js run "Create notes/todo.txt with a short todo list"
 ./bin/run.js run "Change the heading in README.md from daycli to DayCLI"
 ./bin/run.js run "Run npm test and summarize failures"
@@ -157,7 +164,7 @@ Examples:
 
 `write_file` rejects overwriting an existing file unless the model explicitly requests overwrite. `edit_file` uses exact `oldText` / `newText` replacements and reports conflicts when text is missing or ambiguous. `run_command` captures stdout, stderr, exit code, timeout state, and duration.
 
-Every tool call is persisted in `.daycli/sessions`. For write, edit, and command tools, session metadata includes compact audit fields such as changed path, bytes written, replacement count, command cwd, exit code, timeout state, and output byte counts.
+Every tool call is persisted in `.daycli/sessions`. Tool session metadata includes compact audit fields such as matched paths, match counts, changed path, bytes written, replacement count, command cwd, exit code, timeout state, and output byte counts.
 
 ## Batch Mode
 
@@ -222,6 +229,9 @@ Create `daycli.policy.json` in the workspace root to control tool approvals, pat
     },
     "tools": {
       "read_file": "allow",
+      "search_files": "allow",
+      "find_files": "allow",
+      "list_dir": "allow",
       "write_file": "deny",
       "edit_file": "deny",
       "run_command": "allow"
@@ -270,7 +280,15 @@ For CI with controlled write access (e.g. writing reports):
 {
   "version": 1,
   "approvals": {
-    "tools": {"read_file": "allow", "write_file": "allow", "edit_file": "deny", "run_command": "deny"}
+    "tools": {
+      "read_file": "allow",
+      "search_files": "allow",
+      "find_files": "allow",
+      "list_dir": "allow",
+      "write_file": "allow",
+      "edit_file": "deny",
+      "run_command": "deny"
+    }
   },
   "paths": {
     "write": {"allow": ["reports/**"], "deny": [".git/**", "node_modules/**", "dist/**"]}
@@ -286,7 +304,15 @@ For CI that can also run commands (e.g. test runners):
 {
   "version": 1,
   "approvals": {
-    "tools": {"read_file": "allow", "run_command": "allow", "write_file": "deny", "edit_file": "deny"}
+    "tools": {
+      "read_file": "allow",
+      "search_files": "allow",
+      "find_files": "allow",
+      "list_dir": "allow",
+      "run_command": "allow",
+      "write_file": "deny",
+      "edit_file": "deny"
+    }
   },
   "paths": {
     "execute": {"allow": ["."], "deny": [".git/**", "node_modules/**"]}
