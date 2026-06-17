@@ -6,7 +6,7 @@ import {loadDaycliConfig, resolveRunSettings} from '../core/config'
 import {SafeExecutor} from '../core/execution'
 import {toAppError} from '../core/errors'
 import {createLogger} from '../core/observability'
-import {OllamaProvider} from '../core/providers'
+import {createProvider} from '../core/providers'
 import {InteractiveApprovalManager, WorkspacePathGuard} from '../core/security'
 import {SessionStore, type SessionMessageRole} from '../core/storage'
 import {buildToolSystemPrompt, createDefaultToolRouter} from '../core/tools'
@@ -18,13 +18,13 @@ export default class Chat extends Command {
 
   static override flags = {
     model: Flags.string({
-      description: 'Ollama model name (overrides daycli.config.json)',
+      description: 'Provider model name (overrides daycli.config.json)',
     }),
     'base-url': Flags.string({
-      description: 'Ollama base URL (overrides daycli.config.json)',
+      description: 'Provider base URL (overrides daycli.config.json)',
     }),
     'timeout-ms': Flags.integer({
-      description: 'Ollama request timeout in milliseconds (0 to disable timeout, overrides config)',
+      description: 'Provider request timeout in milliseconds (0 to disable timeout, overrides config)',
       min: 0,
     }),
     system: Flags.string({
@@ -50,12 +50,10 @@ export default class Chat extends Command {
         timeoutMs: flags['timeout-ms'],
       })
 
-      const provider = new OllamaProvider({
-        model: settings.model,
-        baseUrl: settings.baseUrl,
-        timeoutMs: settings.timeoutMs,
-      })
       const router = createDefaultToolRouter()
+      const provider = createProvider(settings, {
+        tools: router.list(),
+      })
       const executor = new SafeExecutor({
         toolRouter: router,
         pathGuard: new WorkspacePathGuard(),
@@ -69,6 +67,7 @@ export default class Chat extends Command {
         model: settings.model,
         metadata: {
           command: 'chat',
+          provider: settings.type,
           hasCustomSystemPrompt: flags.system !== undefined,
         },
       })

@@ -1,4 +1,5 @@
 export * from './chatProviderAdapter'
 export * from './orchestrator'
 export * from './sessionPersistence'
+export * from './toolCallParser'
 export * from './types'

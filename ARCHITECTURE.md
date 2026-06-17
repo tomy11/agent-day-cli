@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 ## Overview
-`daycli` คือ TypeScript CLI ที่รับคำสั่งจากผู้ใช้, ส่งต่อให้ LLM provider (เช่น Ollama), แล้วเรียกใช้ local tools อย่างปลอดภัยผ่าน guard และ approval layer
+`daycli` คือ TypeScript CLI ที่รับคำสั่งจากผู้ใช้, ส่งต่อให้ LLM provider (Ollama, OpenAI-compatible, Anthropic, หรือ OpenRouter), แล้วเรียกใช้ local tools อย่างปลอดภัยผ่าน guard และ approval layer
 
 ## High-Level Diagram
 ```text
@@ -27,7 +27,8 @@ Tool Implementations                       |
   |                                       |
   +-------------------- result ---------->+
 
-Command Handler <-> LLM Provider (OllamaProvider)
+Command Handler <-> Provider Factory <-> LLM Provider
+                               (Ollama/OpenAI/Anthropic/OpenRouter)
 
 Command Handler <-> SessionStore (.daycli/sessions/*.json)
 ```
@@ -35,15 +36,38 @@ Command Handler <-> SessionStore (.daycli/sessions/*.json)
 ## Flow
 1. ผู้ใช้เรียกคำสั่งผ่าน CLI
 2. Command Handler parse input + load config
-3. ส่ง prompt/context ไปที่ `OllamaProvider`
-4. ถ้าโมเดลร้องขอ tool call ให้เข้า `toolRouter`
-5. `safeExecutor` ตรวจ guard:
+3. Resolve `provider.type` และ provider-specific config จาก `daycli.config.json`
+4. สร้าง provider ผ่าน provider factory แล้วส่ง prompt/context ไปยัง provider ที่เลือก
+5. ถ้าโมเดลร้องขอ tool call ให้เข้า `toolRouter`
+6. `safeExecutor` ตรวจ guard:
    - path guard: อนุญาตเฉพาะ path ใน workspace
    - safety policy: บังคับ write path policy, command allow/deny rules, และ risk level
    - approval manager: ขออนุมัติเมื่อเป็น action เสี่ยง
-6. เรียก tool implementation และส่งผลลัพธ์กลับ handler
-7. บันทึก session/message metadata ลง `.daycli/sessions`
-8. แสดงผลสุดท้ายให้ผู้ใช้ พร้อม log ที่ตรวจสอบย้อนหลังได้
+7. เรียก tool implementation และส่งผลลัพธ์กลับ handler
+8. บันทึก session/message metadata ลง `.daycli/sessions`
+9. แสดงผลสุดท้ายให้ผู้ใช้ พร้อม log ที่ตรวจสอบย้อนหลังได้
+
+## Provider Selection
+`src/core/config/daycliConfig.ts` supports `provider.type` with `ollama` as the backward-compatible default. Provider-specific sections (`ollama`, `openai`, `anthropic`, `openrouter`, `gemini`, and `mistral`) hold `model`, `baseUrl`, and `timeoutMs`.
+
+`src/core/providers/providerFactory.ts` maps resolved settings to:
+
+- `OllamaProvider`: local `/api/chat` flow, still compatible with JSON tool-call responses.
+- `OpenAIProvider`: OpenAI-compatible `/chat/completions` flow with native function tools.
+- `AnthropicProvider`: Anthropic Messages API with native `tool_use` blocks.
+- `OpenRouterProvider`: OpenRouter `/api/v1/chat/completions` flow with OpenAI-compatible native function tools.
+- `GeminiProvider`: Gemini `generateContent` flow with native `functionDeclarations`.
+- `MistralProvider`: Mistral `/v1/chat/completions` flow with OpenAI-compatible native function tools.
+
+Cloud API keys are read from environment variables only:
+
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `OPENROUTER_API_KEY`
+- `GEMINI_API_KEY`
+- `MISTRAL_API_KEY`
+
+The keys are not part of config validation, provider settings, logs, or session metadata. Native provider tool calls are normalized into the same JSON tool-call contract that the `AgentOrchestrator` already consumes.
 
 ## Agent Loop Sequence
 `daycli run` และ `daycli chat` ใช้ `AgentOrchestrator` เพื่อเรียก provider ซ้ำจนได้ final answer หรือชน guard limit
@@ -59,7 +83,7 @@ AgentOrchestrator
   |
   | 1. send messages
   v
-LLM Provider (OllamaProvider)
+LLM Provider
   |
   | 2a. final answer without toolCalls
   v
@@ -196,19 +220,25 @@ The default policy is intentionally conservative: low-risk reads are allowed, hi
 The loader resolves `daycli.policy.json` inside the workspace by default, validates the schema, and normalizes omitted sections with the conservative defaults. Explicit missing files fail with `POLICY_NOT_FOUND`; invalid JSON, unknown keys, unsupported versions, wrong value types, and out-of-workspace policy paths fail with `POLICY_INVALID`; file-system read failures fail with `POLICY_IO_ERROR`.
 
 ## Core Modules
-- `src/cli/*` : command entrypoints (oclif)
-- `src/providers/OllamaProvider.ts` : เชื่อม Ollama API
+- `src/commands/*` : command entrypoints (oclif)
+- `src/core/providers/providerFactory.ts` : เลือก provider จาก resolved config
+- `src/core/providers/ollama/OllamaProvider.ts` : เชื่อม Ollama API
+- `src/core/providers/openai/OpenAIProvider.ts` : เชื่อม OpenAI-compatible chat completions API
+- `src/core/providers/anthropic/AnthropicProvider.ts` : เชื่อม Anthropic Messages API
+- `src/core/providers/openrouter/OpenRouterProvider.ts` : เชื่อม OpenRouter chat completions API
+- `src/core/providers/gemini/GeminiProvider.ts` : เชื่อม Gemini generateContent API
+- `src/core/providers/mistral/MistralProvider.ts` : เชื่อม Mistral chat completions API
 - `src/core/batch/batchMode.ts` : batch CLI contract and non-interactive behavior
 - `src/core/batch/policyFile.ts` : batch policy schema, loader, validation, and `policyToSafetyPolicy` converter
 - `src/core/batch/policyApprovalManager.ts` : approval manager that evaluates tool calls against the loaded batch policy
-- `src/tools/toolRouter.ts` : map tool name -> handler
-- `src/execution/safeExecutor.ts` : บังคับ policy ก่อน execute
+- `src/core/tools/toolRouter.ts` : map tool name -> handler
+- `src/core/execution/safeExecutor.ts` : บังคับ policy ก่อน execute
 - `src/core/tools/contracts.ts` : shared tool input contracts and risk metadata
 - `src/core/tools/toolPrompt.ts` : prompt text that exposes tool contracts to the agent
 - `src/core/tools/builtin/*Tool.ts` : built-in tool implementations
 - `src/core/security/safetyPolicy.ts` : write path policy, command policy, and risk rules
-- `src/security/pathGuard.ts` : ตรวจ path traversal / out-of-scope
-- `src/security/approvalManager.ts` : interactive approval flow
+- `src/core/security/pathGuard.ts` : ตรวจ path traversal / out-of-scope
+- `src/core/security/approvalManager.ts` : interactive approval flow
 - `src/core/workspace/workspaceSummary.ts` : สร้าง workspace snapshot แบบ read-only สำหรับระบบ prompt/context
 - `src/core/storage/sessionStore.ts` : จัดเก็บ session แบบ JSON ต่อ workspace ใน `.daycli/sessions`
 

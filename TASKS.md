@@ -76,15 +76,18 @@
 - [x] M11 (Search & navigation tools): persist compact audit fields (match counts, paths) for the new tool results in sessions
 - [x] M11 (Search & navigation tools): add unit tests for match, no-match, denied-path, and output-limit cases plus one E2E
 - [x] M11 (Search & navigation tools): update `ARCHITECTURE.md` and the README tools table
-- [ ] M12 (Multi-provider support): add `provider.type` and per-provider config to `daycliConfig.ts` with Ollama as the backward-compatible default
-- [ ] M12 (Multi-provider support): build a provider factory/registry in `src/core/providers`
-- [ ] M12 (Multi-provider support): extract JSON tool-call parsing out of `OllamaProvider` into a shared module
-- [ ] M12 (Multi-provider support): implement an OpenAI-compatible provider with native tool-calling
-- [ ] M12 (Multi-provider support): implement an Anthropic provider
-- [ ] M12 (Multi-provider support): load API keys from environment variables and keep them out of committed config/sessions
-- [ ] M12 (Multi-provider support): support `daycli config set provider.type` with validation and clear error codes
-- [ ] M12 (Multi-provider support): add unit tests per provider, factory selection, and parsing fallback
-- [ ] M12 (Multi-provider support): update docs with per-provider setup and tool-calling differences
+- [x] M12 (Multi-provider support): add `provider.type` and per-provider config to `daycliConfig.ts` with Ollama as the backward-compatible default
+- [x] M12 (Multi-provider support): build a provider factory/registry in `src/core/providers`
+- [x] M12 (Multi-provider support): extract JSON tool-call parsing out of `OllamaProvider` into a shared module
+- [x] M12 (Multi-provider support): implement an OpenAI-compatible provider with native tool-calling
+- [x] M12 (Multi-provider support): implement an Anthropic provider
+- [x] M12 (Multi-provider support): add OpenRouter provider with OpenAI-compatible native tool-calling
+- [x] M12 (Multi-provider support): add Gemini provider with native function declarations
+- [x] M12 (Multi-provider support): add Mistral provider with OpenAI-compatible native tool-calling
+- [x] M12 (Multi-provider support): load API keys from environment variables and keep them out of committed config/sessions
+- [x] M12 (Multi-provider support): support `daycli config set provider.type` with validation and clear error codes
+- [x] M12 (Multi-provider support): add unit tests per provider, factory selection, and parsing fallback
+- [x] M12 (Multi-provider support): update docs with per-provider setup and tool-calling differences
 - [ ] M13 (Embedding-based retrieval): add an embeddings endpoint to the provider abstraction (depends on M12)
 - [ ] M13 (Embedding-based retrieval): extend `CodeChunk` and IndexStore to persist embedding vectors with incremental re-embedding
 - [ ] M13 (Embedding-based retrieval): implement cosine vector search in the Retriever

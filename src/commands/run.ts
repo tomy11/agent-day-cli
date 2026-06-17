@@ -10,7 +10,7 @@ import {
   type AgentMessage,
   type AgentResult,
 } from '../core/agent'
-import {OllamaProvider} from '../core/providers'
+import {createProvider} from '../core/providers'
 import {SafeExecutor} from '../core/execution'
 import {buildToolSystemPrompt, createDefaultToolRouter} from '../core/tools'
 import {InteractiveApprovalManager, WorkspacePathGuard} from '../core/security'
@@ -34,13 +34,13 @@ export default class Run extends Command {
 
   static override flags = {
     model: Flags.string({
-      description: 'Ollama model name (overrides daycli.config.json)',
+      description: 'Provider model name (overrides daycli.config.json)',
     }),
     'base-url': Flags.string({
-      description: 'Ollama base URL (overrides daycli.config.json)',
+      description: 'Provider base URL (overrides daycli.config.json)',
     }),
     'timeout-ms': Flags.integer({
-      description: 'Ollama request timeout in milliseconds (0 to disable timeout, overrides config)',
+      description: 'Provider request timeout in milliseconds (0 to disable timeout, overrides config)',
       min: 0,
     }),
     system: Flags.string({
@@ -81,12 +81,10 @@ export default class Run extends Command {
     const sessionStore = new SessionStore(workspaceRoot)
     let sessionId: string | undefined
 
-    const provider = new OllamaProvider({
-      model: settings.model,
-      baseUrl: settings.baseUrl,
-      timeoutMs: settings.timeoutMs,
-    })
     const router = createDefaultToolRouter()
+    const provider = createProvider(settings, {
+      tools: router.list(),
+    })
 
     let batchSafetyPolicy
     let batchApprovalManager
@@ -139,6 +137,7 @@ export default class Run extends Command {
         model: settings.model,
         metadata: {
           command: 'run',
+          provider: settings.type,
           output: batchMode.output,
           batch: batchMode.enabled,
           nonInteractive: batchMode.nonInteractive,
@@ -148,6 +147,7 @@ export default class Run extends Command {
       sessionId = session.id
       logger.info('session.created', 'run session created', {
         sessionId,
+        provider: settings.type,
       })
 
       await sessionStore.appendMessage(sessionId, {

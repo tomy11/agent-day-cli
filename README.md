@@ -6,7 +6,7 @@ TypeScript AI CLI coding agent (Codex/OpenCode style) with safety guardrails.
 
 - Node.js 22+
 - npm
-- Ollama running at `http://localhost:11434` (default)
+- Ollama running at `http://localhost:11434` (default), or a configured cloud provider API key
 
 ## Install
 
@@ -73,16 +73,48 @@ Update `daycli.config.json`.
 
 Supported keys:
 
+- `provider.type` (`ollama`, `openai`, `anthropic`, `openrouter`, `gemini`, or `mistral`)
 - `ollama.model`
 - `ollama.baseUrl`
 - `ollama.timeoutMs`
+- `openai.model`
+- `openai.baseUrl`
+- `openai.timeoutMs`
+- `anthropic.model`
+- `anthropic.baseUrl`
+- `anthropic.timeoutMs`
+- `openrouter.model`
+- `openrouter.baseUrl`
+- `openrouter.timeoutMs`
+- `gemini.model`
+- `gemini.baseUrl`
+- `gemini.timeoutMs`
+- `mistral.model`
+- `mistral.baseUrl`
+- `mistral.timeoutMs`
 
 Examples:
 
 ```bash
+./bin/run.js config set provider.type ollama
 ./bin/run.js config set ollama.model llama3.1
 ./bin/run.js config set ollama.baseUrl http://localhost:11434
 ./bin/run.js config set ollama.timeoutMs 180000
+
+./bin/run.js config set provider.type openai
+./bin/run.js config set openai.model gpt-4.1-mini
+
+./bin/run.js config set provider.type anthropic
+./bin/run.js config set anthropic.model claude-3-5-sonnet-latest
+
+./bin/run.js config set provider.type openrouter
+./bin/run.js config set openrouter.model anthropic/claude-sonnet-4.5
+
+./bin/run.js config set provider.type gemini
+./bin/run.js config set gemini.model gemini-3.5-flash
+
+./bin/run.js config set provider.type mistral
+./bin/run.js config set mistral.model mistral-large-latest
 ```
 
 ### `daycli session list`
@@ -122,12 +154,50 @@ Example:
 
 ```json
 {
+  "provider": {
+    "type": "ollama"
+  },
   "ollama": {
     "model": "llama3.1",
     "baseUrl": "http://localhost:11434",
     "timeoutMs": 180000
+  },
+  "openai": {
+    "model": "gpt-4.1-mini",
+    "baseUrl": "https://api.openai.com/v1",
+    "timeoutMs": 180000
+  },
+  "anthropic": {
+    "model": "claude-3-5-sonnet-latest",
+    "baseUrl": "https://api.anthropic.com",
+    "timeoutMs": 180000
+  },
+  "openrouter": {
+    "model": "openai/gpt-4.1-mini",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "timeoutMs": 180000
+  },
+  "gemini": {
+    "model": "gemini-3.5-flash",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+    "timeoutMs": 180000
+  },
+  "mistral": {
+    "model": "mistral-large-latest",
+    "baseUrl": "https://api.mistral.ai/v1",
+    "timeoutMs": 180000
   }
 }
+```
+
+API keys are read only from environment variables and should not be committed to `daycli.config.json`:
+
+```bash
+export OPENAI_API_KEY=...
+export ANTHROPIC_API_KEY=...
+export OPENROUTER_API_KEY=...
+export GEMINI_API_KEY=...
+export MISTRAL_API_KEY=...
 ```
 
 ## Safety Notes

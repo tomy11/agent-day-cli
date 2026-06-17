@@ -113,9 +113,35 @@ test('CLI smoke flow works for core commands', async t => {
   assert.equal(configResult.status, 0)
   assert.match(configResult.stdout, /Updated daycli\.config\.json: ollama\.model=llama3\.2/)
 
+  const providerConfigResult = runCli(['config', 'set', 'provider.type', 'openai'], workspace)
+  assert.equal(providerConfigResult.status, 0)
+  assert.match(providerConfigResult.stdout, /Updated daycli\.config\.json: provider\.type=openai/)
+
+  const openRouterConfigResult = runCli(['config', 'set', 'openrouter.model', 'anthropic/claude-sonnet-4.5'], workspace)
+  assert.equal(openRouterConfigResult.status, 0)
+  assert.match(openRouterConfigResult.stdout, /Updated daycli\.config\.json: openrouter\.model=anthropic\/claude-sonnet-4\.5/)
+
+  const geminiConfigResult = runCli(['config', 'set', 'gemini.model', 'gemini-3.5-flash'], workspace)
+  assert.equal(geminiConfigResult.status, 0)
+  assert.match(geminiConfigResult.stdout, /Updated daycli\.config\.json: gemini\.model=gemini-3\.5-flash/)
+
+  const mistralConfigResult = runCli(['config', 'set', 'mistral.model', 'mistral-large-latest'], workspace)
+  assert.equal(mistralConfigResult.status, 0)
+  assert.match(mistralConfigResult.stdout, /Updated daycli\.config\.json: mistral\.model=mistral-large-latest/)
+
   const configRaw = await readFile(path.join(workspace, 'daycli.config.json'), 'utf8')
-  const config = JSON.parse(configRaw) as {ollama?: {model?: string}}
+  const config = JSON.parse(configRaw) as {
+    provider?: {type?: string}
+    ollama?: {model?: string}
+    openrouter?: {model?: string}
+    gemini?: {model?: string}
+    mistral?: {model?: string}
+  }
+  assert.equal(config.provider?.type, 'openai')
   assert.equal(config.ollama?.model, 'llama3.2')
+  assert.equal(config.openrouter?.model, 'anthropic/claude-sonnet-4.5')
+  assert.equal(config.gemini?.model, 'gemini-3.5-flash')
+  assert.equal(config.mistral?.model, 'mistral-large-latest')
 
   const runResult = runCli(['run', 'smoke prompt', '--timeout-ms', '-1'], workspace)
   assert.notEqual(runResult.status, 0)
